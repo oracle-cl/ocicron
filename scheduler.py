@@ -1,6 +1,6 @@
 import os
 import sys
-
+from crontab import CronTab
 from tinydb import TinyDB, Query
 
 
@@ -66,6 +66,42 @@ class ScheduleDB:
     
     def get_start_entries(self, compartment_id):
         return self.start_table.search(self.query.compartment_id == compartment_id)
+    
+
+class Schedule:
+
+    def __init__(self, cronfile=None):
+        if cronfile is not None:
+            self.cronfile = cronfile
+            self.cron = CronTab(user=True, tabfile=self.cronfile)
+        else:
+            self.cron = CronTab(user=True)
+
+    def add_weekday(self, command, hour, comment=None):
+
+        job = self.cron.new(command=command, comment=comment)
+        job.setall('* */{} * * 1-5'.format(hour))
+        return self.cron.write()
+    
+    def add_everyday(self, command, hour, comment=None):
+        
+        job = self.cron.new(command=command, comment=comment)
+        job.setall('* */{} * * * *'.format(hour))
+        return self.cron.write()
+
+    def remove_all(self):
+
+        self.cron.remove_all()
+        self.cron.write()
+    
+    def find_remove(self, command):
+
+        iter = self.cron.find_command(command)
+        for job in iter:
+            self.cron.remove(job)
+        self.cron.write()
+
+
     
 
 
