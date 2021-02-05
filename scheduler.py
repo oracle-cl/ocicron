@@ -1,7 +1,12 @@
 import os
+import oci
 import sys
 from crontab import CronTab
 from tinydb import TinyDB, Query
+
+
+#def scan():
+
 
 
 class ScheduleDB:
@@ -31,7 +36,8 @@ class ScheduleDB:
                 "ocid1.instance.oc1.iad.anuwcljsvoaa5zicx2fh2bln35lx6ldtydtnyjfjoq26nwk5q7yozbnm6pdfg",
                 "ocid1.instance.oc1.iad.anuwcljsvoaa5zicx2fh2bln35lx6ldtydtnyjfjoq26nwk5q7yozbnm62rg"
             ]
-            "time":"2021-02-04T20:00:0" 
+            "time":"20",
+            "region":"us-ashburn-1"
         }
         """
 
