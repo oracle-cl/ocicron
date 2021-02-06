@@ -1,2 +1,6 @@
 .env
 scheduleDB.json
+cron.tab
+ocishutstart.code-workspace
+.secret
+__pycache__/
