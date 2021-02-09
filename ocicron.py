@@ -3,6 +3,13 @@ import os
 import oci
 import sys
 import json
+from tinydb import TinyDB, Query
+from crontab import CronTab
+
+
+DEFAULT_LOCATION=os.getcwd()
+DB_FILE_NAME="scheduleDB.json"
+TAG_KEYS={"stop", "start", "weekly"} 
 
 class OCI:
 
@@ -74,40 +81,48 @@ class OCI:
             self.compute_instances.extend(vms)         
         return self.compute_instances
     
-    def filter_vms(self, tag_key, tag_value):
+    def filter_by_tags(self, tags):
         """
-        filter VMs OCID of a given filter dictionary
-        """
-        vmOCID = []
-        
-        for vm in self.compute_instances:
-            if not vm.freeform_tags:
-                pass
-            else:
-                if tag_key in vm.freeform_tags and vm.freeform_tags[tag_key] == tag_value:
-                    vmOCID.append(vm.id)
-        return {tag_key: tag_value,"vmOCID":vmOCID}
-    
-    def experimental_filter(self, tags):
-        """
-        tags = {"stop":"20","start": "80",weekly":"yes"}
+        returns list if OCID of a given tags
+        tags = {"stop":"20","start": "08","weekly":"yes"}
         """
         vmOCID=[]
         for vm in self.compute_instances:
-            if not vm.freeform_tags:
-                pass
-            else:
-                for key in tags:
-                    print(key)
-                    if tags[key] != vm.freeform_tags[key]:
-                        break
+            #compare dictionary and length should be the same
+            if len(tags.items() & vm.freeform_tags.items()) == len(tags.items()):
                 vmOCID.append(vm.id)
         return vmOCID
+    
+    def _discover_tags(self, tag_keys=TAG_KEYS):
+        """
+        Discovery tag keys and values from compute freeform_tags
+
+        example: discover_tag({"stop", "start", "weekly"})
+        result: [{'start': '08', 'stop': '20', 'weekly': 'no'}, {'start': '08', 'stop': '20', 'weekly': 'yes'}]
+        """
+        #tag_keys = {"stop", "start", "weekly"}
+        result = []
+        vm_group = {}
+        for vm in self.compute_instances:
+            if len(tag_keys & vm.freeform_tags.keys()) == len(tag_keys):
+                tags = {}
+                for key in tag_keys:
+                    tags[key] = vm.freeform_tags[key]
+                if tags not in result:
+                    result.append(tags)
+        return result
 
 
-    @staticmethod
-    def unique(listA,listB):
-        return list(set(listA) & set(listB))
+    def vms_by_tags(self, tag_keys=TAG_KEYS):   
+
+        tags = self._discover_tags()
+        result = []
+        for tag in tags:
+            vm_group = {}
+            vm_group["tags"] = tag
+            vm_group["vmOCID"] = self.filter_by_tags(tag)
+            result.append(vm_group)
+        return result
 
     def instance_action(self, instances, action):
         """
@@ -118,16 +133,11 @@ class OCI:
 
 class ScheduleDB:
 
-    def __init__(self, location=None):
+    def __init__(self, location=os.path.join(DEFAULT_LOCATION, DB_FILE_NAME)):
         self.location = location
         self.db = TinyDB(self.location)
+        self.vm_table = self.db.table('ocicron')
 
-        #stop table
-        self.stop_table = self.db.table('stop')
-        #start table
-        self.start_table = self.db.table('start')
-        #weekly table
-        #self.weekly_table = self.db.table('weekly')
         #Query
         self.query = Query()
         """
@@ -143,37 +153,16 @@ class ScheduleDB:
             "region":"us-ashburn-1"
         }
         """
+    def add_table(self, table_name):
+        return self.db.table(table_name)
 
-    def _check_entry(self, entry):
-        # if 'compartment_id' not in entry:
-        #     raise Exception("compartment_id is required")
-
-        if 'vmOCID' not in entry or len(entry['vmOCID']) <= 0:
-            raise Exception("At least one  vmOCID is required")
-
-        if 'time' not in entry:
-            raise Exception("time field is required")
+    def insert(self, entry):
+        return self.table.insert(entry)
     
-    def insert_stop(self, entry):
-        self._check_entry(entry)
+    def find_by_region(self, region):
+        return self.table.search(self.query.region==region)
 
-        return self.stop_table.insert(entry)
 
-    def insert_start(self, entry):
-        self._check_entry(entry)
-        return self.start_table.insert(entry)
-
-    # def insert_weekly(self, entry):
-    #     self._check_entry(entry)
-    #     return self.weekly_table.insert(entry)
-
-    def get_stop_entries(self, compartment_id):
-        return self.stop_table.search(self.query.compartment_id == compartment_id)
-    
-    def get_start_entries(self, compartment_id):
-        return self.start_table.search(self.query.compartment_id == compartment_id)
-    
-    
 
 class Schedule:
 
@@ -183,17 +172,10 @@ class Schedule:
             self.cron = CronTab(user=True, tabfile=self.cronfile)
         else:
             self.cron = CronTab(user=True)
-
-    def add_weekday(self, command, hour, comment=None):
-
-        job = self.cron.new(command=command, comment=comment)
-        job.setall('* */{} * * 1-5'.format(hour))
-        return self.cron.write()
     
-    def add_everyday(self, command, hour, comment=None):
-        
+    def new(self, command, schedule, comment=None):
         job = self.cron.new(command=command, comment=comment)
-        job.setall('* */{} * * * *'.format(hour))
+        job.setall(schedule)
         return self.cron.write()
 
     def remove_all(self):
@@ -211,15 +193,13 @@ class Schedule:
 #init function
 def init(comparments_ids, regions):
 
-    db_file = os.path.join(DB_LOCATION_PATH, DB_FILE_NAME)
+    db_file = os.path.join(DEFAULT_LOCATION, DB_FILE_NAME)
     if os.path.isfile(db_file):
         print("File {} exists".format(DB_FILE_NAME))
         sys.exit(0)
+    db = ScheduleDB()
     profile="ladmcrs"
-    ocicrondb = ScheduleDB(db_file)
-    
-    oci1 = OCI("config", profile=profile)
-    
+    oci1 = OCI("config", profile=profile)   
 
     #crawl compartments
     for cid in comparments_ids:
@@ -231,52 +211,76 @@ def init(comparments_ids, regions):
         conn.compartment_ids = oci1.compartment_ids
         #Get all instances
         conn.get_all_instances()
-        stop=conn.filter_vms("stop", "20")
-        start=conn.filter_vms("start", "08")
-        weekly=conn.filter_vms("weekly", "yes")
-        noweekly=conn.filter_vms("weekly", "no")
-        stop_weekly = conn.unique(stop['vmOCID'], weekly['vmOCID'])
-        start_weekly = conn.unique(start['vmOCID'], weekly['vmOCID'])
-        stop_noweekly = conn.unique(stop['vmOCID'], noweekly['vmOCID'])
-        start_noweekly = conn.unique(start['vmOCID'], noweekly['vmOCID'])
-        
-        #record in database
-        entry = {
-            "time":"20",
-            "weekly": "yes",
-            "region": region,
-            "vmOCID": stop_weekly
-        }
-        ocicrondb.insert_stop(entry)
-        entry = {
-            "time":"08",
-            "weekly": "yes",
-            "region": region,
-            "vmOCID": start_weekly
-        }
-        ocicrondb.insert_start(entry)
+        filter_vms = conn.vms_by_tags()
+        for vms in filter_vms:
+            entry = {
+                'region':region,
+                'start':vms['tags']['start'],
+                'stop':vms['tags']['stop'],
+                'weekly':vms['tags']['weekly'],
+                'vmOCID':vms['vmOCID']
+            }
+            db.insert(entry)
+    
+    #schedule jobs
+    cronfile = os.path.join(DEFAULT_LOCATION, 'cron.tab')
+    schedule = Schedule(cronfile)
 
-        entry = {
-            "time":"20",
-            "weekly": "no",
-            "region": region,
-            "vmOCID": stop_noweekly
-        }
-        ocicrondb.insert_stop(entry)
-        entry = {
-            "time":"08",
-            "weekly": "no",
-            "region": region,
-            "vmOCID": start_noweekly
-        }
-        ocicrondb.insert_start(entry)
+
+    for region in regions:
+        result = db.find_by_region(region)
+        for r in result:
+            if r['weekly'] == 'no':
+                schedule.new(
+                    'python ocicron.py --region {} --action stop'.format(region),
+                    '* */{} * * 1-5'.format(r['stop']))
+                schedule.new(
+                    'python ocicron.py --region {} --action start'.format(region),
+                    '* */{} * * 1-5'.format(r['start']))
+                #stop_comands.append('* */{} * * 1-5 python ocicron.py --region {} --action stop'.format(r['stop'], region))
+                #start_comands.append('* */{} * * 1-5 python ocicron.py --region {} --action start'.format(r['start'], region))
+            else:
+                schedule.new(
+                    'python ocicron.py --region {} --action stop --weekly'.format(region),
+                    '* */{} * * *'.format(r['stop']))
+                schedule.new(
+                    'python ocicron.py --region {} --action start --weekly'.format(region),
+                    '* */{} * * *'.format(r['start']))
+                #stop_comands.append('* */{} * * * * python ocicron.py --region {} --action stop --weekly'.format(r['stop'], region))
+                #start_comands.append('* */{} * * * * python ocicron.py --region {} --action start --weekly'.format(r['start'], region))
+
+    
+
+
+def argparser():
+    """
+
+    #stop instances in ashburn region where weekly is set to 'yes'
+    python ocicron.py --region us-ashburn-1 --action stop --weekly
+
+    #start instances in ashburn region where weekly is set to 'no'
+    python ocicron.py --region us-ashburn-1 --action start 
+    """
+
+    
+    return      
+
+
+
+
+ 
 
 if __name__ == "__main__":
 
-    DB_LOCATION_PATH=os.getcwd()
-    DB_FILE_NAME="scheduleDB"
+    profile="ladmcrs"
+    cid="ocid1.compartment.oc1..aaaaaaaa4bybtq6axk7odphukoulaqsq6zdewp7kgqunjxhw3icuohglhnwa"
+    
+    init([cid],["us-ashburn-1"])
 
-    compartments = ["ocid1.compartment.oc1..aaaaaaaa4bybtq6axk7odphukoulaqsq6zdewp7kgqunjxhw3icuohglhnwa"]
-    all_regions = ["us-ashburn-1"]
+
+
+    
+
+
 
    
