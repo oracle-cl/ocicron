@@ -153,7 +153,7 @@ class ScheduleDB:
             ]
             "Stop":"20",
             "Start":"08",
-            "Weekly_stop":"yes"
+            "Weekly_stop":"Yes"
             "region":"us-ashburn-1"
         }
         """
@@ -194,7 +194,7 @@ class Schedule:
     @staticmethod
     def cron_generator(hour, weekend, region, action, user='opc'):
         """
-        EJ: 0 20 * * * python ocicron.py --region us-ashburn-1 --action stop --weekly
+        EJ: 0 20 * * * python ocicron.py --region us-ashburn-1 --action stop --at 09 --weekend-stop
         r['Stop'], False, region, 'stop'
         """
         #if weekend is True means should remains stopped all weekend
@@ -211,19 +211,17 @@ class Schedule:
         """
         for job in self.cron.find_time(schedule):
             if job:
-                return True
-        return False
+                return job
+        return None
 
     def remove_all(self):
-
+        #remove all jobs in cron file
         self.cron.remove_all()
         self.cron.write()
     
-    def find_remove(self, schedule):
-
-        iter = self.cron.find_time(schedule)
-        for job in iter:
-            self.cron.remove(job)
+    def remove(self, job):
+        #remove job
+        self.cron.remove(job)
         self.cron.write()
 
 #init function
@@ -284,6 +282,39 @@ def init(comparments_ids, regions):
                 if not cron.is_schedule(schedule):
                     cron.new(command, schedule)
 
+def execute(region, action, hour, weekend_stop, **kwargs):
+    """
+    This function will read argmuments and will find in local database to execute according
+
+    0 20 * * * python ocicron.py --region us-ashburn-1 --action stop --at 09 --weekend-stop
+    """
+    db = ScheduleDB()
+    
+    if action == 'stop':
+        result = db.vm_table.search((db.query.region == region) & (db.query.Weekend_stop == weekend_stop) & (db.query.Stop == hour))
+        action = 'SOFTSTOP'
+    
+    elif action == 'start':
+        result = db.vm_table.search((db.query.region == region) & (db.query.Weekend_stop == weekend_stop) & (db.query.Start == hour))
+        action = 'START'
+    else:
+        raise Exception("unrecognize action (stop|start)")
+    
+    if len(result) == 0:
+        return "No result found for given query"
+
+    #print(result)
+    #connect to OCI
+    conn = OCI(auth_type=kwargs['auth_type'], 
+        profile=kwargs['profile'], 
+        region=region)
+
+    #given a list of ocid execute action
+    conn.instance_action(result[0]['vmOCID'], action)
+
+
+def sync():
+    return
 def argparser():
     """
 
@@ -296,18 +327,14 @@ def argparser():
 
     
     return      
-
-
-
-
  
 
 if __name__ == "__main__":
 
     profile="ladmcrs"
     cid="ocid1.compartment.oc1..aaaaaaaa4bybtq6axk7odphukoulaqsq6zdewp7kgqunjxhw3icuohglhnwa"
-    
-    init([cid],["us-ashburn-1"])
+    region = 'us-ashburn-1'
+    execute(region, 'start', '07', 'No', auth_type='config', profile=profile)
 
 
 
