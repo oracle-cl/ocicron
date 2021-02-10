@@ -9,7 +9,7 @@ from crontab import CronTab
 
 DEFAULT_LOCATION=os.getcwd()
 DB_FILE_NAME="scheduleDB.json"
-TAG_KEYS={"stop", "start", "weekly"} 
+TAG_KEYS={"Stop", "Start", "Weekend_stop"} 
 
 class OCI:
 
@@ -84,7 +84,7 @@ class OCI:
     def filter_by_tags(self, tags):
         """
         returns list if OCID of a given tags
-        tags = {"stop":"20","start": "08","weekly":"yes"}
+        tags = {"Stop":"20","Start": "08","Weekly_stop":"Yes"}
         """
         vmOCID=[]
         for vm in self.compute_instances:
@@ -97,10 +97,9 @@ class OCI:
         """
         Discovery tag keys and values from compute freeform_tags
 
-        example: discover_tag({"stop", "start", "weekly"})
-        result: [{'start': '08', 'stop': '20', 'weekly': 'no'}, {'start': '08', 'stop': '20', 'weekly': 'yes'}]
+        example: discover_tag({"Stop", "Start", "Weekly_stop"})
+        result: [{'Start': '08', 'Stop': '20', 'Weekly_stop': 'No'}, {'Start': '08', 'Stop': '20', 'Weekly_stop': 'Yes'}]
         """
-        #tag_keys = {"stop", "start", "weekly"}
         result = []
         vm_group = {}
         for vm in self.compute_instances:
@@ -136,10 +135,14 @@ class ScheduleDB:
     def __init__(self, location=os.path.join(DEFAULT_LOCATION, DB_FILE_NAME)):
         self.location = location
         self.db = TinyDB(self.location)
-        self.vm_table = self.db.table('ocicron')
+        self.vm_table = self.db.table('vms')
+        self.cid_table = self.db.table('compartments')
+        self.cron_table = self.db.table('cron')
 
         #Query
         self.query = Query()
+
+    def insert_vm(self, entry):
         """
         sample table entry
         {
@@ -148,44 +151,77 @@ class ScheduleDB:
                 "ocid1.instance.oc1.iad.anuwcljsvoaa5zicx2fh2bln35lx6ldtydtnyjfjoq26nwk5q7yozbnm6pdfg",
                 "ocid1.instance.oc1.iad.anuwcljsvoaa5zicx2fh2bln35lx6ldtydtnyjfjoq26nwk5q7yozbnm62rg"
             ]
-            "time":"20",
-            "weekly":"yes"
+            "Stop":"20",
+            "Start":"08",
+            "Weekly_stop":"yes"
             "region":"us-ashburn-1"
         }
         """
-    def add_table(self, table_name):
-        return self.db.table(table_name)
-
-    def insert(self, entry):
-        return self.table.insert(entry)
+        return self.vm_table.insert(entry)
+    
+    def insert_cids(self, entry):
+        """
+        {
+            "compartments": [
+                "ocid1.compartment.oc1..aaaaaaaa4bybtq6axk7odphukoulaqsq6zdewp7kgqunjxhw3icuohglhnwa",
+                "ocid1.compartment.oc1..aaaaaaaa4bybtq6axk7odphukoulaqsq6zdewp7kgqunjxhw3icuohglhasd",
+                "ocid1.compartment.oc1..aaaaaaaa4bybtq6axk7odphukoulaqsq6zdewp7kgqunjxhw3icuohg2daty"
+            ]
+        }
+        """
+        return self.cid_table.insert(entry)
     
     def find_by_region(self, region):
-        return self.table.search(self.query.region==region)
+        return self.vm_table.search(self.query.region==region)
 
 
 
 class Schedule:
 
-    def __init__(self, cronfile=None):
-        if cronfile is not None:
-            self.cronfile = cronfile
-            self.cron = CronTab(user=True, tabfile=self.cronfile)
+    def __init__(self, tabfile=None):
+        if tabfile is not None:
+            self.tabfile = tabfile
+            self.cron = CronTab(user=True, tabfile=self.tabfile)
         else:
             self.cron = CronTab(user=True)
     
     def new(self, command, schedule, comment=None):
         job = self.cron.new(command=command, comment=comment)
+        
         job.setall(schedule)
         return self.cron.write()
+    
+    @staticmethod
+    def cron_generator(hour, weekend, region, action, user='opc'):
+        """
+        EJ: 0 20 * * * python ocicron.py --region us-ashburn-1 --action stop --weekly
+        r['Stop'], False, region, 'stop'
+        """
+        #if weekend is True means should remains stopped all weekend
+        if weekend:
+            return '0 {} * * 1-5'.format(hour), 'python ocicron.py --region {} --action {} --at {} --weekend-stop'.format(region, action, hour)
+        else:
+            #the cron will execute everyday at given hour
+            return '0 {} * * *'.format(hour), 'python ocicron.py --region {} --action {} --at {}'.format(region, action, hour)
+
+    
+    def is_schedule(self, schedule):
+        """
+        Find if a given schedule exists in crontab file
+        """
+        for job in self.cron.find_time(schedule):
+            if job:
+                return True
+        return False
 
     def remove_all(self):
 
         self.cron.remove_all()
         self.cron.write()
     
-    def find_remove(self, command):
+    def find_remove(self, schedule):
 
-        iter = self.cron.find_command(command)
+        iter = self.cron.find_time(schedule)
         for job in iter:
             self.cron.remove(job)
         self.cron.write()
@@ -204,53 +240,49 @@ def init(comparments_ids, regions):
     #crawl compartments
     for cid in comparments_ids:
         oci1.compartment_crawler(cid)
+    #Insert compartments in database
+    db.insert_cids({'compartments': oci1.compartment_ids})
+    
     
     for region in regions:
         conn = OCI("config", profile=profile, region=region)
         #No need to search compartments again
-        conn.compartment_ids = oci1.compartment_ids
-        #Get all instances
+        conn.compartment_ids = db.cid_table.all()[0]['compartments']
+        #get all instances
         conn.get_all_instances()
         filter_vms = conn.vms_by_tags()
         for vms in filter_vms:
             entry = {
                 'region':region,
-                'start':vms['tags']['start'],
-                'stop':vms['tags']['stop'],
-                'weekly':vms['tags']['weekly'],
+                'Start':vms['tags']['Start'],
+                'Stop':vms['tags']['Stop'],
+                'Weekend_stop':vms['tags']['Weekend_stop'],
                 'vmOCID':vms['vmOCID']
             }
-            db.insert(entry)
+            db.insert_vm(entry)
     
     #schedule jobs
     cronfile = os.path.join(DEFAULT_LOCATION, 'cron.tab')
-    schedule = Schedule(cronfile)
+    cron = Schedule(cronfile)
 
 
     for region in regions:
         result = db.find_by_region(region)
         for r in result:
-            if r['weekly'] == 'no':
-                schedule.new(
-                    'python ocicron.py --region {} --action stop'.format(region),
-                    '* */{} * * 1-5'.format(r['stop']))
-                schedule.new(
-                    'python ocicron.py --region {} --action start'.format(region),
-                    '* */{} * * 1-5'.format(r['start']))
-                #stop_comands.append('* */{} * * 1-5 python ocicron.py --region {} --action stop'.format(r['stop'], region))
-                #start_comands.append('* */{} * * 1-5 python ocicron.py --region {} --action start'.format(r['start'], region))
+            if r['Weekend_stop'] == 'No':
+                schedule, command = cron.cron_generator(r['Stop'], False, region, 'stop')
+                if not cron.is_schedule(schedule):
+                    cron.new(command, schedule)
+                schedule, command = cron.cron_generator(r['Start'], False, region, 'start')
+                if not cron.is_schedule(schedule):
+                    cron.new(command, schedule)
             else:
-                schedule.new(
-                    'python ocicron.py --region {} --action stop --weekly'.format(region),
-                    '* */{} * * *'.format(r['stop']))
-                schedule.new(
-                    'python ocicron.py --region {} --action start --weekly'.format(region),
-                    '* */{} * * *'.format(r['start']))
-                #stop_comands.append('* */{} * * * * python ocicron.py --region {} --action stop --weekly'.format(r['stop'], region))
-                #start_comands.append('* */{} * * * * python ocicron.py --region {} --action start --weekly'.format(r['start'], region))
-
-    
-
+                schedule, command = cron.cron_generator(r['Stop'], True, region, 'stop')
+                if not cron.is_schedule(schedule):
+                    cron.new(command, schedule)
+                schedule, command = cron.cron_generator(r['Start'], True, region, 'start')
+                if not cron.is_schedule(schedule):
+                    cron.new(command, schedule)
 
 def argparser():
     """
