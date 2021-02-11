@@ -9,12 +9,15 @@ from crontab import CronTab
 
 
 DEFAULT_LOCATION=os.getcwd()
+DEFAULT_PYTHON_ENV=os.path.join(DEFAULT_LOCATION, '.env', 'bin/python')
 DB_FILE_NAME="scheduleDB.json"
 TAG_KEYS={"Stop", "Start", "Weekend_stop"}
 REGIONS=['us-ashburn-1']
 COMPARTMENTS=["ocid1.compartment.oc1..aaaaaaaa4bybtq6axk7odphukoulaqsq6zdewp7kgqunjxhw3icuohglhnwa"]
 DEFAULT_AUTH_TYPE='config'
 DEFAULT_PROFILE="ladmcrs"
+DEFAULT_SYNC_SCHEDULE='0 23 1 * *'
+DEFAULT_SYNC_COMMAND=DEFAULT_PYTHON_ENV + ' ' + 'ocicron.py sync'
 
 class OCI:
 
@@ -170,9 +173,9 @@ class Schedule:
         """
         #if weekend is True means should remains stopped all weekend
         if weekend == 'yes':
-            return '0 {} * * 1-5'.format(hour), 'python ocicron.py --region {} --action {} --at {} --weekend-stop {}'.format(region, action, hour, weekend)
+            return '0 {} * * 1-5'.format(hour), '{} ocicron.py --region {} --action {} --at {} --weekend-stop {}'.format(DEFAULT_PYTHON_ENV, region, action, hour, weekend)
         else:
-            return '0 {} * * *'.format(hour), 'python ocicron.py --region {} --action {} --at {} --weekend-stop {}'.format(region, action, hour, weekend)
+            return '0 {} * * *'.format(hour), '{} ocicron.py --region {} --action {} --at {} --weekend-stop {}'.format(DEFAULT_PYTHON_ENV,region, action, hour, weekend)
     
     def is_schedule(self, schedule):
         """
@@ -182,15 +185,11 @@ class Schedule:
             if job:
                 return job
         return None
-
-    def remove_all(self):
-        #remove all jobs in cron file
-        self.cron.remove_all()
-        self.cron.write()
-    
-    def remove(self, job):
-        #remove job
-        self.cron.remove(job)
+    def clean_jobs(self, command):
+        """
+        Find commands in crontab and remove them
+        """
+        self.cron.remove_all(command=command)
         self.cron.write()
 
 #init function
@@ -231,7 +230,10 @@ def init(comparments_ids=COMPARTMENTS, regions=REGIONS):
     cronfile = os.path.join(DEFAULT_LOCATION, 'cron.tab')
     cron = Schedule(cronfile)
 
+    #schedule sync command
+    cron.new(DEFAULT_SYNC_COMMAND, DEFAULT_SYNC_SCHEDULE)
 
+    #Loop over regions to fund records and create cronjobs
     for region in regions:
         result = db.vm_table.search(db.query.region==region)
         for r in result:
@@ -273,8 +275,8 @@ def execute(region, action, hour, weekend_stop, **kwargs):
 
     #print(result)
     #connect to OCI
-    conn = OCI(auth_type=kwargs['auth_type'], 
-        profile=kwargs['profile'], 
+    conn = OCI(auth_type=DEFAULT_AUTH_TYPE, 
+        profile=DEFAULT_PROFILE, 
         region=region)
 
     #given a list of ocid execute action
@@ -318,8 +320,28 @@ def sync(comparments_ids=COMPARTMENTS, regions=REGIONS):
             db.vm_table.insert(entry)
     
     #schedule jobs
-    #cronfile = os.path.join(DEFAULT_LOCATION, 'cron.tab')
-    #cron = Schedule(cronfile)
+    cronfile = os.path.join(DEFAULT_LOCATION, 'cron.tab')
+    cron = Schedule(cronfile)
+    #clean jobs
+    cron.clean_jobs('ocicron.py --region')
+
+    for region in regions:
+        result = db.vm_table.search(db.query.region==region)
+        for r in result:
+            if r['Weekend_stop'] == 'No':
+                schedule, command = cron.cron_generator(r['Stop'], 'no', region, 'stop')
+                if not cron.is_schedule(schedule):
+                    cron.new(command, schedule)
+                schedule, command = cron.cron_generator(r['Start'], 'no', region, 'start')
+                if not cron.is_schedule(schedule):
+                    cron.new(command, schedule)
+            else:
+                schedule, command = cron.cron_generator(r['Stop'], 'yes', region, 'stop')
+                if not cron.is_schedule(schedule):
+                    cron.new(command, schedule)
+                schedule, command = cron.cron_generator(r['Start'], 'yes', region, 'start')
+                if not cron.is_schedule(schedule):
+                    cron.new(command, schedule)
 
 def cli():
     """
@@ -352,7 +374,7 @@ def cli():
         sys.exit(0)
 
     if sys.argv[1] == 'sync':
-        init()
+        sync()
         sys.exit(0)
 
     return parser.parse_args()
@@ -360,13 +382,9 @@ def cli():
  
 
 if __name__ == "__main__":
-
-
     
-    cli()
-#    print(parse)
-#    execute(parse.region, parse.action, parse.at, parse.weekend_stop, auth_type='config', profile="ladmcrs")
-
+    args = cli()
+    execute(args.region, args.action, args.at, args.weekend_stop)
 
 
 
