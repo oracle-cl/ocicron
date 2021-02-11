@@ -14,14 +14,16 @@ DB_FILE_NAME="scheduleDB.json"
 TAG_KEYS={"Stop", "Start", "Weekend_stop"}
 REGIONS=['us-ashburn-1']
 COMPARTMENTS=["ocid1.compartment.oc1..aaaaaaaa4bybtq6axk7odphukoulaqsq6zdewp7kgqunjxhw3icuohglhnwa"]
-DEFAULT_AUTH_TYPE='config'
-DEFAULT_PROFILE="ladmcrs"
+DEFAULT_AUTH_TYPE='principal'
+DEFAULT_PROFILE="DEFAULT"
 DEFAULT_SYNC_SCHEDULE='0 23 1 * *'
 DEFAULT_SYNC_COMMAND=DEFAULT_PYTHON_ENV + ' ' + 'ocicron.py sync'
+CRONTAB_FILE_NAME='ocicron'
+CRONTAB_LOCATION='/etc/cron.d'
 
 class OCI:
 
-    def __init__(self, auth_type="principal", config_file="~/.oci/config", profile="DEFAULT", region=None):
+    def __init__(self, auth_type, config_file="~/.oci/config", profile="DEFAULT", region=None):
         self.auth_type = auth_type
         self.config_file = config_file
         self.profile = profile
@@ -200,7 +202,7 @@ def init(comparments_ids=COMPARTMENTS, regions=REGIONS):
         print("File {} exists".format(DB_FILE_NAME))
         sys.exit(0)
     db = ScheduleDB()
-    oci1 = OCI("config", profile=DEFAULT_PROFILE)   
+    oci1 = OCI(auth_type=DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE)   
 
     #crawl compartments
     for cid in comparments_ids:
@@ -210,7 +212,7 @@ def init(comparments_ids=COMPARTMENTS, regions=REGIONS):
     
     
     for region in regions:
-        conn = OCI("config", profile=DEFAULT_PROFILE, region=region)
+        conn = OCI(auth_type=DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE, region=region)
         #No need to search compartments again
         conn.compartment_ids = db.cid_table.all()[0]['compartments']
         #get all instances
@@ -227,7 +229,7 @@ def init(comparments_ids=COMPARTMENTS, regions=REGIONS):
             db.vm_table.insert(entry)
     
     #schedule jobs
-    cronfile = os.path.join(DEFAULT_LOCATION, 'cron.tab')
+    cronfile = os.path.join(CRONTAB_LOCATION, CRONTAB_FILE_NAME)
     cron = Schedule(cronfile)
 
     #schedule sync command
@@ -288,7 +290,7 @@ def sync(comparments_ids=COMPARTMENTS, regions=REGIONS):
     This function will crawl compartments and vms tags and update database and crons if needed 
     """
     db = ScheduleDB()
-    oci1 = OCI(DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE)   
+    oci1 = OCI(auth_type=DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE)   
 
     #crawl compartments
     for cid in comparments_ids:
@@ -320,7 +322,7 @@ def sync(comparments_ids=COMPARTMENTS, regions=REGIONS):
             db.vm_table.insert(entry)
     
     #schedule jobs
-    cronfile = os.path.join(DEFAULT_LOCATION, 'cron.tab')
+    cronfile = os.path.join(CRONTAB_LOCATION, CRONTAB_FILE_NAME)
     cron = Schedule(cronfile)
     #clean jobs
     cron.clean_jobs('ocicron.py --region')
