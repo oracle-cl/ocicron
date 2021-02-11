@@ -3,13 +3,18 @@ import os
 import oci
 import sys
 import json
+import argparse
 from tinydb import TinyDB, Query
 from crontab import CronTab
 
 
 DEFAULT_LOCATION=os.getcwd()
 DB_FILE_NAME="scheduleDB.json"
-TAG_KEYS={"Stop", "Start", "Weekend_stop"} 
+TAG_KEYS={"Stop", "Start", "Weekend_stop"}
+REGIONS=['us-ashburn-1']
+COMPARTMENTS=["ocid1.compartment.oc1..aaaaaaaa4bybtq6axk7odphukoulaqsq6zdewp7kgqunjxhw3icuohglhnwa"]
+DEFAULT_AUTH_TYPE='config'
+DEFAULT_PROFILE="ladmcrs"
 
 class OCI:
 
@@ -142,40 +147,6 @@ class ScheduleDB:
         #Query
         self.query = Query()
 
-    def insert_vm(self, entry):
-        """
-        sample table entry
-        {
-            "vmOCID": [
-                "ocid1.instance.oc1.iad.anuwcljsvoaa5zicx2fh2bln35lx6ldtydtnyjfjoq26nwk5q7yozbnm6pna",
-                "ocid1.instance.oc1.iad.anuwcljsvoaa5zicx2fh2bln35lx6ldtydtnyjfjoq26nwk5q7yozbnm6pdfg",
-                "ocid1.instance.oc1.iad.anuwcljsvoaa5zicx2fh2bln35lx6ldtydtnyjfjoq26nwk5q7yozbnm62rg"
-            ]
-            "Stop":"20",
-            "Start":"08",
-            "Weekly_stop":"Yes"
-            "region":"us-ashburn-1"
-        }
-        """
-        return self.vm_table.insert(entry)
-    
-    def insert_cids(self, entry):
-        """
-        {
-            "compartments": [
-                "ocid1.compartment.oc1..aaaaaaaa4bybtq6axk7odphukoulaqsq6zdewp7kgqunjxhw3icuohglhnwa",
-                "ocid1.compartment.oc1..aaaaaaaa4bybtq6axk7odphukoulaqsq6zdewp7kgqunjxhw3icuohglhasd",
-                "ocid1.compartment.oc1..aaaaaaaa4bybtq6axk7odphukoulaqsq6zdewp7kgqunjxhw3icuohg2daty"
-            ]
-        }
-        """
-        return self.cid_table.insert(entry)
-    
-    def find_by_region(self, region):
-        return self.vm_table.search(self.query.region==region)
-
-
-
 class Schedule:
 
     def __init__(self, tabfile=None):
@@ -192,18 +163,16 @@ class Schedule:
         return self.cron.write()
     
     @staticmethod
-    def cron_generator(hour, weekend, region, action, user='opc'):
+    def cron_generator(hour, weekend, region, action):
         """
-        EJ: 0 20 * * * python ocicron.py --region us-ashburn-1 --action stop --at 09 --weekend-stop
+        EJ: 0 20 * * * python ocicron.py --region us-ashburn-1 --action stop --at 09 --weekend-stop yes
         r['Stop'], False, region, 'stop'
         """
         #if weekend is True means should remains stopped all weekend
-        if weekend:
-            return '0 {} * * 1-5'.format(hour), 'python ocicron.py --region {} --action {} --at {} --weekend-stop'.format(region, action, hour)
+        if weekend == 'yes':
+            return '0 {} * * 1-5'.format(hour), 'python ocicron.py --region {} --action {} --at {} --weekend-stop {}'.format(region, action, hour, weekend)
         else:
-            #the cron will execute everyday at given hour
-            return '0 {} * * *'.format(hour), 'python ocicron.py --region {} --action {} --at {}'.format(region, action, hour)
-
+            return '0 {} * * *'.format(hour), 'python ocicron.py --region {} --action {} --at {} --weekend-stop {}'.format(region, action, hour, weekend)
     
     def is_schedule(self, schedule):
         """
@@ -225,25 +194,24 @@ class Schedule:
         self.cron.write()
 
 #init function
-def init(comparments_ids, regions):
+def init(comparments_ids=COMPARTMENTS, regions=REGIONS):
 
     db_file = os.path.join(DEFAULT_LOCATION, DB_FILE_NAME)
     if os.path.isfile(db_file):
         print("File {} exists".format(DB_FILE_NAME))
         sys.exit(0)
     db = ScheduleDB()
-    profile="ladmcrs"
-    oci1 = OCI("config", profile=profile)   
+    oci1 = OCI("config", profile=DEFAULT_PROFILE)   
 
     #crawl compartments
     for cid in comparments_ids:
         oci1.compartment_crawler(cid)
     #Insert compartments in database
-    db.insert_cids({'compartments': oci1.compartment_ids})
+    db.cid_table.insert({'compartments': oci1.compartment_ids})
     
     
     for region in regions:
-        conn = OCI("config", profile=profile, region=region)
+        conn = OCI("config", profile=DEFAULT_PROFILE, region=region)
         #No need to search compartments again
         conn.compartment_ids = db.cid_table.all()[0]['compartments']
         #get all instances
@@ -257,7 +225,7 @@ def init(comparments_ids, regions):
                 'Weekend_stop':vms['tags']['Weekend_stop'],
                 'vmOCID':vms['vmOCID']
             }
-            db.insert_vm(entry)
+            db.vm_table.insert(entry)
     
     #schedule jobs
     cronfile = os.path.join(DEFAULT_LOCATION, 'cron.tab')
@@ -265,20 +233,20 @@ def init(comparments_ids, regions):
 
 
     for region in regions:
-        result = db.find_by_region(region)
+        result = db.vm_table.search(db.query.region==region)
         for r in result:
             if r['Weekend_stop'] == 'No':
-                schedule, command = cron.cron_generator(r['Stop'], False, region, 'stop')
+                schedule, command = cron.cron_generator(r['Stop'], 'no', region, 'stop')
                 if not cron.is_schedule(schedule):
                     cron.new(command, schedule)
-                schedule, command = cron.cron_generator(r['Start'], False, region, 'start')
+                schedule, command = cron.cron_generator(r['Start'], 'no', region, 'start')
                 if not cron.is_schedule(schedule):
                     cron.new(command, schedule)
             else:
-                schedule, command = cron.cron_generator(r['Stop'], True, region, 'stop')
+                schedule, command = cron.cron_generator(r['Stop'], 'yes', region, 'stop')
                 if not cron.is_schedule(schedule):
                     cron.new(command, schedule)
-                schedule, command = cron.cron_generator(r['Start'], True, region, 'start')
+                schedule, command = cron.cron_generator(r['Start'], 'yes', region, 'start')
                 if not cron.is_schedule(schedule):
                     cron.new(command, schedule)
 
@@ -286,16 +254,16 @@ def execute(region, action, hour, weekend_stop, **kwargs):
     """
     This function will read argmuments and will find in local database to execute according
 
-    0 20 * * * python ocicron.py --region us-ashburn-1 --action stop --at 09 --weekend-stop
+    0 20 * * * python ocicron.py --region us-ashburn-1 --action stop --at 09 --weekend-stop yes
     """
     db = ScheduleDB()
     
     if action == 'stop':
-        result = db.vm_table.search((db.query.region == region) & (db.query.Weekend_stop == weekend_stop) & (db.query.Stop == hour))
+        result = db.vm_table.search((db.query.region == region) & (db.query.Weekend_stop == weekend_stop.capitalize()) & (db.query.Stop == hour))
         action = 'SOFTSTOP'
     
     elif action == 'start':
-        result = db.vm_table.search((db.query.region == region) & (db.query.Weekend_stop == weekend_stop) & (db.query.Start == hour))
+        result = db.vm_table.search((db.query.region == region) & (db.query.Weekend_stop == weekend_stop.capitalize()) & (db.query.Start == hour))
         action = 'START'
     else:
         raise Exception("unrecognize action (stop|start)")
@@ -313,28 +281,92 @@ def execute(region, action, hour, weekend_stop, **kwargs):
     conn.instance_action(result[0]['vmOCID'], action)
 
 
-def sync():
-    return
-def argparser():
+def sync(comparments_ids=COMPARTMENTS, regions=REGIONS):
+    """
+    This function will crawl compartments and vms tags and update database and crons if needed 
+    """
+    db = ScheduleDB()
+    oci1 = OCI(DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE)   
+
+    #crawl compartments
+    for cid in comparments_ids:
+        oci1.compartment_crawler(cid)
+    #check if compartments hasn't change
+    if len(db.cid_table.search(db.query.compartments == oci1.compartment_ids)) == 0:
+    #Insert compartments in database
+        db.cid_table.update({'compartments': oci1.compartment_ids})
+
+       
+    for region in regions:
+        conn = OCI(DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE, region=region)
+        #No need to search compartments again
+        conn.compartment_ids = db.cid_table.all()[0]['compartments']
+        #get all instances
+        conn.get_all_instances()
+        filter_vms = conn.vms_by_tags()
+        #clean records in table
+        db.vm_table.remove(db.query.region==region)
+        #Insert records
+        for vms in filter_vms:
+            entry = {
+                'region':region,
+                'Start':vms['tags']['Start'],
+                'Stop':vms['tags']['Stop'],
+                'Weekend_stop':vms['tags']['Weekend_stop'],
+                'vmOCID':vms['vmOCID']
+            }
+            db.vm_table.insert(entry)
+    
+    #schedule jobs
+    #cronfile = os.path.join(DEFAULT_LOCATION, 'cron.tab')
+    #cron = Schedule(cronfile)
+
+def cli():
     """
 
     #stop instances in ashburn region where weekly is set to 'yes'
-    python ocicron.py --region us-ashburn-1 --action stop --weekly
+    0 20 * * 1-5 python ocicron.py --region us-ashburn-1 --action stop --at 20 --weekend-stop
 
-    #start instances in ashburn region where weekly is set to 'no'
-    python ocicron.py --region us-ashburn-1 --action start 
+    #start instances in ashburn region where Weekend_stop is set to 'no'
+    python ocicron.py --region us-ashburn-1 --action starts --at 19
     """
+    parser = argparse.ArgumentParser(
+        prog='python ocicron.py',
+        description='''OCI actions schedule tool. \n
+            ocicron was desing to scan freeform_tags in OCI and schedule \n
+            start or stop in vms instances. \n
 
+            Use python ocicron.py init to make the first scan. \n
+            ''')
+    parser.add_argument('--region', help='oci region to connect', required=True)
+    parser.add_argument('--action', help='start or stop', choices=['stop', 'start'], required=True)
+    parser.add_argument('--at', required=True)
+    parser.add_argument('--weekend-stop', help='is this machines should remain stopped on weekends', choices=['yes', 'no'], required=True)
+
+    if sys.argv[1] == 'help':
+        parser.print_help()
+        sys.exit(0)
     
-    return      
+    if sys.argv[1] == 'init':
+        init()
+        sys.exit(0)
+
+    if sys.argv[1] == 'sync':
+        init()
+        sys.exit(0)
+
+    return parser.parse_args()
+ 
  
 
 if __name__ == "__main__":
 
-    profile="ladmcrs"
-    cid="ocid1.compartment.oc1..aaaaaaaa4bybtq6axk7odphukoulaqsq6zdewp7kgqunjxhw3icuohglhnwa"
-    region = 'us-ashburn-1'
-    execute(region, 'start', '07', 'No', auth_type='config', profile=profile)
+
+    
+    cli()
+#    print(parse)
+#    execute(parse.region, parse.action, parse.at, parse.weekend_stop, auth_type='config', profile="ladmcrs")
+
 
 
 
