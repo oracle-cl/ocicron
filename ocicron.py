@@ -9,7 +9,6 @@ from crontab import CronTab
 
 
 DEFAULT_LOCATION=os.getcwd()
-DEFAULT_PYTHON_ENV=os.path.join(DEFAULT_LOCATION, '.env', 'bin/python')
 DB_FILE_NAME="scheduleDB.json"
 TAG_KEYS={"Stop", "Start", "Weekend_stop"}
 REGIONS=['us-ashburn-1']
@@ -17,7 +16,7 @@ COMPARTMENTS=["ocid1.compartment.oc1..aaaaaaaa4bybtq6axk7odphukoulaqsq6zdewp7kgq
 DEFAULT_AUTH_TYPE='principal'
 DEFAULT_PROFILE="DEFAULT"
 DEFAULT_SYNC_SCHEDULE='0 23 1 * *'
-DEFAULT_SYNC_COMMAND=DEFAULT_PYTHON_ENV + ' ' + 'ocicron.py sync'
+DEFAULT_SYNC_COMMAND=DEFAULT_LOCATION + '/ocicron.py sync'
 #CRONTAB_FILE_NAME='ocicron.tab'
 #CRONTAB_LOCATION='/etc/cron.d'
 #CRONTAB_LOCATION=os.getcwd()
@@ -176,9 +175,9 @@ class Schedule:
         """
         #if weekend is True means should remains stopped all weekend
         if weekend == 'yes':
-            return '0 {} * * 1-5'.format(hour), '{} ocicron.py --region {} --action {} --at {} --weekend-stop {}'.format(DEFAULT_PYTHON_ENV, region, action, hour, weekend)
+            return '0 {} * * 1-5'.format(hour), '{}/ocicron.py --region {} --action {} --at {} --weekend-stop {}'.format(DEFAULT_LOCATION, region, action, hour, weekend)
         else:
-            return '0 {} * * *'.format(hour), '{} ocicron.py --region {} --action {} --at {} --weekend-stop {}'.format(DEFAULT_PYTHON_ENV,region, action, hour, weekend)
+            return '0 {} * * *'.format(hour), '{}/ocicron.py --region {} --action {} --at {} --weekend-stop {}'.format(DEFAULT_LOCATION,region, action, hour, weekend)
     
     def is_schedule(self, schedule):
         """
