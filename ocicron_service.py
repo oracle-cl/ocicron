@@ -83,7 +83,9 @@ class OCI:
                 response = self.compute.list_instances(compartment_id, page=response.next_page)
                 vms.extend(response.data)  
 
-            self.compute_instances.extend(vms)         
+            for vm in vms:
+                if vm.lifecycle_state == 'RUNNING' or vm.lifecycle_state == 'STOPPED':
+                    self.compute_instances.append(vm)         
         return self.compute_instances
     
     def filter_by_tags(self, tags):
