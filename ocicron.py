@@ -10,22 +10,24 @@ DB_FILE_NAME="scheduleDB.json"
 TAG_KEYS={"Stop", "Start", "Weekend_stop"}
 REGIONS=['us-ashburn-1', 'sa-santiago-1']
 COMPARTMENTS=["ocid1.compartment.oc1..aaaaaaaa4bybtq6axk7odphukoulaqsq6zdewp7kgqunjxhw3icuohglhnwa"]
-DEFAULT_AUTH_TYPE='config'
-DEFAULT_PROFILE="ladmcrs"
+DEFAULT_AUTH_TYPE='principal'
+DEFAULT_PROFILE="DEFAULT"
 DEFAULT_SYNC_SCHEDULE='0 23 1 * *'
 DEFAULT_SYNC_COMMAND=DEFAULT_LOCATION + '/ocicron.py sync'
 CRONTAB_FILE_NAME=os.path.join(os.getcwd(),'ocicron.tab')
 #CRONTAB_LOCATION='/etc/cron.d'
 #CRONTAB_LOCATION=os.getcwd()
 
+db = ScheduleDB()
+cron = Schedule()
+
+
 
 def schedule_commands():
     """
     this function will read database and will schedule command execution
     """
-    db = ScheduleDB()
     result = db.vm_table.all()
-    cron = Schedule(CRONTAB_FILE_NAME)
 
     for r in result:
         if r['Weekend_stop'] == 'No':
@@ -46,11 +48,10 @@ def schedule_commands():
 #init function
 def init(comparments_ids=COMPARTMENTS, regions=REGIONS):
 
-    db_file = os.path.join(DEFAULT_LOCATION, DB_FILE_NAME)
-    if os.path.isfile(db_file):
-        print("File {} exists".format(DB_FILE_NAME))
-        sys.exit(0)
-    db = ScheduleDB()
+    if len(db.vm_table.all()) > 0 or len(db.cid_table.all()) > 0:
+        print("database is not empty")
+        sys.exit()
+    
     oci1 = OCI(auth_type=DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE)   
 
     #crawl compartments
@@ -77,30 +78,12 @@ def init(comparments_ids=COMPARTMENTS, regions=REGIONS):
             }
             db.vm_table.insert(entry)
     
-    #schedule jobs
-    cron = Schedule(CRONTAB_FILE_NAME)
-
-    #schedule sync command
-    cron.new(DEFAULT_SYNC_COMMAND, DEFAULT_SYNC_SCHEDULE)
+    #schedule sync command - check this as well
+    if not cron.is_schedule(DEFAULT_SYNC_COMMAND):
+        cron.new(DEFAULT_SYNC_COMMAND, DEFAULT_SYNC_SCHEDULE)
 
     #Loop over regions to fund records and create cronjobs
-    for region in regions:
-        result = db.vm_table.search(db.query.region==region)
-        for r in result:
-            if r['Weekend_stop'] == 'No':
-                schedule, command = cron.cron_generator(r['Stop'], 'no', region, 'stop')
-                if not cron.is_schedule(schedule):
-                    cron.new(command, schedule)
-                schedule, command = cron.cron_generator(r['Start'], 'no', region, 'start')
-                if not cron.is_schedule(schedule):
-                    cron.new(command, schedule)
-            else:
-                schedule, command = cron.cron_generator(r['Stop'], 'yes', region, 'stop')
-                if not cron.is_schedule(schedule):
-                    cron.new(command, schedule)
-                schedule, command = cron.cron_generator(r['Start'], 'yes', region, 'start')
-                if not cron.is_schedule(schedule):
-                    cron.new(command, schedule)
+    schedule_commands()
 
 def execute(region, action, hour, weekend_stop, **kwargs):
     """
@@ -108,7 +91,6 @@ def execute(region, action, hour, weekend_stop, **kwargs):
 
     0 20 * * * python ocicron.py --region us-ashburn-1 --action stop --at 09 --weekend-stop yes
     """
-    db = ScheduleDB()
     
     if action == 'stop':
         result = db.vm_table.search((db.query.region == region) & (db.query.Weekend_stop == weekend_stop.capitalize()) & (db.query.Stop == hour))
@@ -137,7 +119,6 @@ def sync(comparments_ids=COMPARTMENTS, regions=REGIONS):
     """
     This function will crawl compartments and vms tags and update database and crons if needed 
     """
-    db = ScheduleDB()
     oci1 = OCI(auth_type=DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE)   
 
     #crawl compartments
@@ -169,28 +150,11 @@ def sync(comparments_ids=COMPARTMENTS, regions=REGIONS):
             }
             db.vm_table.insert(entry)
     
-    #schedule jobs
-    cron = Schedule(CRONTAB_FILE_NAME)
+
     #clean jobs
     cron.clean_jobs('ocicron.py --region')
-
-    for region in regions:
-        result = db.vm_table.search(db.query.region==region)
-        for r in result:
-            if r['Weekend_stop'] == 'No':
-                schedule, command = cron.cron_generator(r['Stop'], 'no', region, 'stop')
-                if not cron.is_schedule(schedule):
-                    cron.new(command, schedule)
-                schedule, command = cron.cron_generator(r['Start'], 'no', region, 'start')
-                if not cron.is_schedule(schedule):
-                    cron.new(command, schedule)
-            else:
-                schedule, command = cron.cron_generator(r['Stop'], 'yes', region, 'stop')
-                if not cron.is_schedule(schedule):
-                    cron.new(command, schedule)
-                schedule, command = cron.cron_generator(r['Start'], 'yes', region, 'start')
-                if not cron.is_schedule(schedule):
-                    cron.new(command, schedule)
+    #query and create cronjobs
+    schedule_commands()
 
 def cli():
     """
@@ -232,8 +196,8 @@ def cli():
 
 if __name__ == "__main__":
     
-    #args = cli()
-    #execute(args.region, args.action, args.at, args.weekend_stop)
+    args = cli()
+    execute(args.region, args.action, args.at, args.weekend_stop)
     schedule_commands()
 
 
