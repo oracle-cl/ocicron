@@ -18,8 +18,9 @@ DEFAULT_AUTH_TYPE='principal'
 DEFAULT_PROFILE="DEFAULT"
 DEFAULT_SYNC_SCHEDULE='0 23 1 * *'
 DEFAULT_SYNC_COMMAND=DEFAULT_PYTHON_ENV + ' ' + 'ocicron.py sync'
-CRONTAB_FILE_NAME='ocicron'
-CRONTAB_LOCATION='/etc/cron.d'
+#CRONTAB_FILE_NAME='ocicron.tab'
+#CRONTAB_LOCATION='/etc/cron.d'
+#CRONTAB_LOCATION=os.getcwd()
 
 class OCI:
 
@@ -229,8 +230,7 @@ def init(comparments_ids=COMPARTMENTS, regions=REGIONS):
             db.vm_table.insert(entry)
     
     #schedule jobs
-    cronfile = os.path.join(CRONTAB_LOCATION, CRONTAB_FILE_NAME)
-    cron = Schedule(cronfile)
+    cron = Schedule()
 
     #schedule sync command
     cron.new(DEFAULT_SYNC_COMMAND, DEFAULT_SYNC_SCHEDULE)
@@ -322,8 +322,7 @@ def sync(comparments_ids=COMPARTMENTS, regions=REGIONS):
             db.vm_table.insert(entry)
     
     #schedule jobs
-    cronfile = os.path.join(CRONTAB_LOCATION, CRONTAB_FILE_NAME)
-    cron = Schedule(cronfile)
+    cron = Schedule()
     #clean jobs
     cron.clean_jobs('ocicron.py --region')
 
