@@ -11,7 +11,7 @@ COMPARTMENTS=["ocid1.compartment.oc1..aaaaaaaa4bybtq6axk7odphukoulaqsq6zdewp7kgq
 DEFAULT_AUTH_TYPE='principal'
 DEFAULT_PROFILE="DEFAULT"
 DEFAULT_SYNC_SCHEDULE='0 23 1 * *'
-DEFAULT_SYNC_COMMAND=DEFAULT_LOCATION + '/ocicron.py sync'
+DEFAULT_SYNC_COMMAND='cd {} && ./ocicron.py sync'.format(DEFAULT_LOCATION)
 #CRONTAB_FILE_NAME=os.path.join(os.getcwd(),'ocicron.tab')
 
 db = ScheduleDB()

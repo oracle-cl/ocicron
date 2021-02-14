@@ -165,9 +165,9 @@ class Schedule:
         """
         #if weekend is True means should remains stopped all weekend
         if weekend == 'yes':
-            return '0 {} * * 1-5'.format(hour), '{}/ocicron.py --region {} --action {} --at {} --weekend-stop {}'.format(DEFAULT_LOCATION, region, action, hour, weekend)
+            return '0 {} * * 1-5'.format(hour), 'cd {} && ./ocicron.py --region {} --action {} --at {} --weekend-stop {}'.format(DEFAULT_LOCATION, region, action, hour, weekend)
         else:
-            return '0 {} * * *'.format(hour), '{}/ocicron.py --region {} --action {} --at {} --weekend-stop {}'.format(DEFAULT_LOCATION, region, action, hour, weekend)
+            return '0 {} * * *'.format(hour), 'cd {} && ./ocicron.py --region {} --action {} --at {} --weekend-stop {}'.format(DEFAULT_LOCATION, region, action, hour, weekend)
     
     def is_schedule(self, command):
         """
