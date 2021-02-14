@@ -7,13 +7,6 @@ from crontab import CronTab
 DEFAULT_LOCATION=os.getcwd()
 DB_FILE_NAME="scheduleDB.json"
 TAG_KEYS={"Stop", "Start", "Weekend_stop"}
-REGIONS=['us-ashburn-1', 'sa-santiago-1']
-COMPARTMENTS=["ocid1.compartment.oc1..aaaaaaaa4bybtq6axk7odphukoulaqsq6zdewp7kgqunjxhw3icuohglhnwa"]
-DEFAULT_AUTH_TYPE='config'
-DEFAULT_PROFILE="ladmcrs"
-DEFAULT_SYNC_SCHEDULE='0 23 1 * *'
-DEFAULT_SYNC_COMMAND=DEFAULT_LOCATION + '/ocicron.py sync'
-CRONTAB_FILE_NAME=os.path.join(os.getcwd(),'ocicron.tab')
 
 
 class OCI:
