@@ -6,21 +6,16 @@ from ocicron_service import OCI, ScheduleDB, Schedule
 
 
 DEFAULT_LOCATION=os.getcwd()
-DB_FILE_NAME="scheduleDB.json"
-TAG_KEYS={"Stop", "Start", "Weekend_stop"}
 REGIONS=['us-ashburn-1', 'sa-santiago-1']
 COMPARTMENTS=["ocid1.compartment.oc1..aaaaaaaa4bybtq6axk7odphukoulaqsq6zdewp7kgqunjxhw3icuohglhnwa"]
 DEFAULT_AUTH_TYPE='principal'
 DEFAULT_PROFILE="DEFAULT"
 DEFAULT_SYNC_SCHEDULE='0 23 1 * *'
 DEFAULT_SYNC_COMMAND=DEFAULT_LOCATION + '/ocicron.py sync'
-CRONTAB_FILE_NAME=os.path.join(os.getcwd(),'ocicron.tab')
-#CRONTAB_LOCATION='/etc/cron.d'
-#CRONTAB_LOCATION=os.getcwd()
+#CRONTAB_FILE_NAME=os.path.join(os.getcwd(),'ocicron.tab')
 
 db = ScheduleDB()
 cron = Schedule()
-
 
 
 def schedule_commands():
@@ -45,22 +40,9 @@ def schedule_commands():
             if not cron.is_schedule(command):
                 cron.new(command, schedule)
 
-#init function
-def init(comparments_ids=COMPARTMENTS, regions=REGIONS):
+def generate_entries(regions):
 
-    if len(db.vm_table.all()) > 0 or len(db.cid_table.all()) > 0:
-        print("database is not empty")
-        sys.exit()
-    
-    oci1 = OCI(auth_type=DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE)   
-
-    #crawl compartments
-    for cid in comparments_ids:
-        oci1.compartment_crawler(cid)
-    #Insert compartments in database
-    db.cid_table.insert({'compartments': oci1.compartment_ids})
-    
-    
+    entries = []
     for region in regions:
         conn = OCI(auth_type=DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE, region=region)
         #No need to search compartments again
@@ -76,7 +58,27 @@ def init(comparments_ids=COMPARTMENTS, regions=REGIONS):
                 'Weekend_stop':vms['tags']['Weekend_stop'],
                 'vmOCID':vms['vmOCID']
             }
-            db.vm_table.insert(entry)
+            entries.append(entry)
+    return entries
+
+#init function
+def init(comparments_ids=COMPARTMENTS, regions=REGIONS):
+
+    if len(db.vm_table.all()) > 0 or len(db.cid_table.all()) > 0:
+        print("database is not empty")
+        sys.exit()
+    
+    oci1 = OCI(auth_type=DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE)   
+
+    #crawl compartments
+    for cid in comparments_ids:
+        oci1.compartment_crawler(cid)
+    #Insert compartments in database
+    db.cid_table.insert({'compartments': oci1.compartment_ids})
+    
+    #Scan region and generate entries to the database
+    for entry in generate_entries(REGIONS):
+        db.vm_table.insert(entry)
     
     #schedule sync command - check this as well
     if not cron.is_schedule(DEFAULT_SYNC_COMMAND):
@@ -129,28 +131,10 @@ def sync(comparments_ids=COMPARTMENTS, regions=REGIONS):
     #Insert compartments in database
         db.cid_table.update({'compartments': oci1.compartment_ids})
 
-       
-    for region in regions:
-        conn = OCI(DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE, region=region)
-        #No need to search compartments again
-        conn.compartment_ids = db.cid_table.all()[0]['compartments']
-        #get all instances
-        conn.get_all_instances()
-        filter_vms = conn.vms_by_tags()
-        #clean records in table
-        db.vm_table.remove(db.query.region==region)
-        #Insert records
-        for vms in filter_vms:
-            entry = {
-                'region':region,
-                'Start':vms['tags']['Start'],
-                'Stop':vms['tags']['Stop'],
-                'Weekend_stop':vms['tags']['Weekend_stop'],
-                'vmOCID':vms['vmOCID']
-            }
-            db.vm_table.insert(entry)
+    #Scan region and generate entries to the database 
+    for entry in generate_entries(REGIONS):
+        db.vm_table.insert(entry)
     
-
     #clean jobs
     cron.clean_jobs('ocicron.py --region')
     #query and create cronjobs
