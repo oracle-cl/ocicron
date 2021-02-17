@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 import os
 import sys
+import logging
 import argparse
 from ocicron_service import OCI, ScheduleDB, Schedule
 
@@ -12,10 +13,14 @@ DEFAULT_AUTH_TYPE='principal'
 DEFAULT_PROFILE="DEFAULT"
 DEFAULT_SYNC_SCHEDULE='0 23 1 * *'
 DEFAULT_SYNC_COMMAND='cd {} && ./ocicron.py sync'.format(DEFAULT_LOCATION)
-#CRONTAB_FILE_NAME=os.path.join(os.getcwd(),'ocicron.tab')
+CRONTAB_FILE_NAME=os.path.join(os.getcwd(),'ocicron.tab')
 
+#ocicron Database
 db = ScheduleDB()
+#Crontab
 cron = Schedule()
+#Logging
+logging.basicConfig(filename='ocicron.log', level=logging.INFO, format='%(asctime)s :: %(levelname)s :: %(message)s')
 
 
 def schedule_commands():
@@ -44,11 +49,19 @@ def generate_entries(regions):
 
     entries = []
     for region in regions:
-        conn = OCI(auth_type=DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE, region=region)
+        try:
+            conn = OCI(auth_type=DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE, region=region)
+        except Exception as e:
+            logging.error("Exception occurred", exc_info=True)
+            sys.exit()
         #No need to search compartments again
         conn.compartment_ids = db.cid_table.all()[0]['compartments']
         #get all instances
-        conn.get_all_instances()
+        try:
+            conn.get_all_instances()
+        except Exception as e:
+            logging.error("Exception occurred", exc_info=True)
+            sys.exit()
         filter_vms = conn.vms_by_tags()
         for vms in filter_vms:
             entry = {
@@ -64,8 +77,9 @@ def generate_entries(regions):
 #init function
 def init(comparments_ids=COMPARTMENTS, regions=REGIONS):
 
+    logging.info('ocicron is initiating')
     if len(db.vm_table.all()) > 0 or len(db.cid_table.all()) > 0:
-        print("database is not empty")
+        logging.info('Database already exists')
         sys.exit()
     
     oci1 = OCI(auth_type=DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE)   
@@ -73,6 +87,7 @@ def init(comparments_ids=COMPARTMENTS, regions=REGIONS):
     #crawl compartments
     for cid in comparments_ids:
         oci1.compartment_crawler(cid)
+
     #Insert compartments in database
     db.cid_table.insert({'compartments': oci1.compartment_ids})
     
@@ -86,8 +101,9 @@ def init(comparments_ids=COMPARTMENTS, regions=REGIONS):
 
     #Loop over regions to fund records and create cronjobs
     schedule_commands()
+    logging.info('Start/Stop commands has been scheduled')
 
-def execute(region, action, hour, weekend_stop, **kwargs):
+def vm_execute(region, action, hour, weekend_stop, **kwargs):
     """
     This function will read argmuments and will find in local database to execute according
 
@@ -105,22 +121,35 @@ def execute(region, action, hour, weekend_stop, **kwargs):
         raise Exception("unrecognize action (stop|start)")
     
     if len(result) == 0:
-        return "No result found for given query"
+        logging.warning('No result found for given query -- region:{}, action:{}, hour{}, weekend_stop: {}'.format(region, action, hour, weekend_stop))
+        sys.exit()
+    else:
+        logging.INFO('{} VM OCIDs match with query'.format(result[0]['vmOCID']))
 
     #print(result)
     #connect to OCI
-    conn = OCI(auth_type=DEFAULT_AUTH_TYPE, 
-        profile=DEFAULT_PROFILE, 
-        region=region)
+    try:
+        conn = OCI(auth_type=DEFAULT_AUTH_TYPE, 
+            profile=DEFAULT_PROFILE, 
+            region=region)
+    except Exception as e:
+        logging.error("Exception occurred", exc_info=True)
+        sys.exit()
 
     #given a list of ocid execute action
-    conn.instance_action(result[0]['vmOCID'], action)
+    try:
+        conn.instance_action(result[0]['vmOCID'], action)
+    except Exception as e:
+        logging.error("Exception occurred", exc_info=True)
+        sys.exit(9)
 
 
 def sync(comparments_ids=COMPARTMENTS, regions=REGIONS):
     """
     This function will crawl compartments and vms tags and update database and crons if needed 
     """
+
+    logging.info('ocicron is syncing')
     oci1 = OCI(auth_type=DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE)   
 
     #crawl compartments
@@ -181,8 +210,7 @@ def cli():
 if __name__ == "__main__":
     
     args = cli()
-    execute(args.region, args.action, args.at, args.weekend_stop)
-    schedule_commands()
+    vm_execute(args.region, args.action, args.at, args.weekend_stop)
 
 
 
