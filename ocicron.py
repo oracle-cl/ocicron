@@ -8,8 +8,9 @@ from ocicron_service import OCI, ScheduleDB, Schedule
 
 DEFAULT_LOCATION=os.getcwd()
 REGIONS=['us-ashburn-1', 'sa-santiago-1']
-COMPARTMENTS=["ocid1.compartment.oc1..aaaaaaaa4bybtq6axk7odphukoulaqsq6zdewp7kgqunjxhw3icuohglhnwa"]
-DEFAULT_AUTH_TYPE='principal'
+#COMPARTMENTS=["ocid1.compartment.oc1..aaaaaaaa4bybtq6axk7odphukoulaqsq6zdewp7kgqunjxhw3icuohglhnwa"]
+COMPARTMENTS=[]
+DEFAULT_AUTH_TYPE='config'
 DEFAULT_PROFILE="DEFAULT"
 DEFAULT_SYNC_SCHEDULE='0 23 1 * *'
 DEFAULT_SYNC_COMMAND='cd {} && ./ocicron.py sync'.format(DEFAULT_LOCATION)
@@ -52,7 +53,7 @@ def generate_entries(regions):
         try:
             conn = OCI(auth_type=DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE, region=region)
         except Exception as e:
-            logging.error("Exception occurred", exc_info=True)
+            logging.error(e, exc_info=True)
             sys.exit()
         #No need to search compartments again
         conn.compartment_ids = db.cid_table.all()[0]['compartments']
@@ -63,6 +64,7 @@ def generate_entries(regions):
             logging.error("Exception occurred", exc_info=True)
             sys.exit()
         filter_vms = conn.vms_by_tags()
+        #vm_entries = []
         for vms in filter_vms:
             entry = {
                 'region':region,
@@ -84,9 +86,12 @@ def init(comparments_ids=COMPARTMENTS, regions=REGIONS):
     
     oci1 = OCI(auth_type=DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE)   
 
-    #crawl compartments
-    for cid in comparments_ids:
-        oci1.compartment_crawler(cid)
+    if len(COMPARTMENTS) <= 0:
+        oci1.compartment_crawler()
+    else:
+        #crawl compartments
+        for cid in comparments_ids:
+            oci1.compartment_crawler(cid)
 
     #Insert compartments in database
     db.cid_table.insert({'compartments': oci1.compartment_ids})
@@ -124,7 +129,7 @@ def vm_execute(region, action, hour, weekend_stop, **kwargs):
         logging.warning('No result found for given query -- region:{}, action:{}, hour{}, weekend_stop: {}'.format(region, action, hour, weekend_stop))
         sys.exit()
     else:
-        logging.INFO('{} VM OCIDs match with query'.format(result[0]['vmOCID']))
+        logging.info('{} VM OCIDs match with query'.format(result[0]['vmOCID']))
 
     #print(result)
     #connect to OCI
@@ -133,7 +138,7 @@ def vm_execute(region, action, hour, weekend_stop, **kwargs):
             profile=DEFAULT_PROFILE, 
             region=region)
     except Exception as e:
-        logging.error("Exception occurred", exc_info=True)
+        logging.error(e, exc_info=True)
         sys.exit()
 
     #given a list of ocid execute action
@@ -152,9 +157,12 @@ def sync(comparments_ids=COMPARTMENTS, regions=REGIONS):
     logging.info('ocicron is syncing')
     oci1 = OCI(auth_type=DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE)   
 
-    #crawl compartments
-    for cid in comparments_ids:
-        oci1.compartment_crawler(cid)
+    if len(COMPARTMENTS) <= 0:
+        oci1.compartment_crawler()
+    else:
+        #crawl compartments
+        for cid in comparments_ids:
+            oci1.compartment_crawler(cid)
     #check if compartments hasn't change
     if len(db.cid_table.search(db.query.compartments == oci1.compartment_ids)) == 0:
     #Insert compartments in database
