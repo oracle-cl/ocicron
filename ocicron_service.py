@@ -8,6 +8,35 @@ DEFAULT_LOCATION=os.getcwd()
 DB_FILE_NAME="scheduleDB.json"
 TAG_KEYS={"Stop", "Start", "Weekend_stop"}
 
+#Fix Too Many request error
+custom_retry_strategy = oci.retry.RetryStrategyBuilder(
+    # Whether to enable a check that we don't exceed a certain number of attempts
+    max_attempts_check=True,
+    # check that will retry on connection errors, timeouts and service errors 
+    service_error_check=True,
+    # a check that we don't exceed a certain amount of time retrying
+    total_elapsed_time_check=True,
+    # maximum number of attempts
+    max_attempts=10,
+    # don't exceed a total of 900 seconds for all calls
+    total_elapsed_time_seconds=900,
+    # if we are checking o service errors, we can configure what HTTP statuses to retry on
+    # and optionally whether the textual code (e.g. TooManyRequests) matches a given value
+    service_error_retry_config={
+        400: ['QuotaExceeded', 'LimitExceeded'],
+        429: []
+    },
+    # whether to retry on HTTP 5xx errors
+    service_error_retry_on_any_5xx=True,
+    # Used for exponention backoff with jitter
+    retry_base_sleep_time_seconds=2,
+    # Wait 60 seconds between attempts
+    retry_max_wait_between_calls_seconds=60,
+    # the type of backoff
+    # Accepted values are: BACKOFF_FULL_JITTER_VALUE, BACKOFF_EQUAL_JITTER_VALUE, BACKOFF_FULL_JITTER_EQUAL_ON_THROTTLE_VALUE
+    backoff_type=oci.retry.BACKOFF_FULL_JITTER_EQUAL_ON_THROTTLE_VALUE
+).get_retry_strategy()
+
 
 class OCI:
 
@@ -18,22 +47,22 @@ class OCI:
         self.region = region
 
         if self.auth_type == "principal":
-            signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
+            self.signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
             if self.region is not None:
-                self.compute = oci.core.ComputeClient(config={'region':self.region}, signer=signer)
-                self.identity = oci.identity.IdentityClient(config={'region':self.region}, signer=signer)
-                self.database = oci.database.DatabaseClient(config={'region':self.region}, signer=signer)
+                self.compute = oci.core.ComputeClient(config={'region':self.region}, signer=self.signer, retry_strategy=custom_retry_strategy)
+                self.identity = oci.identity.IdentityClient(config={'region':self.region}, signer=self.signer, retry_strategy=custom_retry_strategy)
+                self.database = oci.database.DatabaseClient(config={'region':self.region}, signer=self.signer, retry_strategy=custom_retry_strategy)
             else:
-                self.compute = oci.core.ComputeClient(config={}, signer=signer)
-                self.identity = oci.identity.IdentityClient(config={}, signer=signer)
-                self.database = oci.database.DatabaseClient(config={}, signer=signer)
+                self.compute = oci.core.ComputeClient(config={}, signer=self.signer, retry_strategy=custom_retry_strategy)
+                self.identity = oci.identity.IdentityClient(config={}, signer=self.signer, retry_strategy=custom_retry_strategy)
+                self.database = oci.database.DatabaseClient(config={}, signer=self.signer, retry_strategy=custom_retry_strategy)
         elif self.auth_type == "config":
             self.config = oci.config.from_file(file_location=config_file, profile_name=profile)
             if self.region is not None:
                 self.config['region'] = self.region
-            self.compute = oci.core.ComputeClient(self.config)
-            self.identity = oci.identity.IdentityClient(self.config)
-            self.database = oci.database.DatabaseClient(self.config)
+            self.compute = oci.core.ComputeClient(self.config, retry_strategy=custom_retry_strategy)
+            self.identity = oci.identity.IdentityClient(self.config, retry_strategy=custom_retry_strategy)
+            self.database = oci.database.DatabaseClient(self.config, retry_strategy=custom_retry_strategy)
         else:
             raise Exception("Unrecognize authentication type: auth_type=(principal|config)")
         
@@ -55,9 +84,15 @@ class OCI:
                 if compartment.lifecycle_state == "ACTIVE" and compartment.id not in self.compartment_ids:
                         self.compartment_ids.append(compartment.id)
 
-    def compartment_crawler(self, parent_cid):
-        
-        self._get_sub_compartment_ids(parent_cid)
+    def compartment_crawler(self, comparments_id=None):
+
+        if comparments_id is not None:
+            self._get_sub_compartment_ids(comparments_id)
+        else:        
+            if self.auth_type == "config":
+                self._get_sub_compartment_ids(self.config['tenancy'])
+            else:
+                self._get_sub_compartment_ids(self.signer.tenancy_id)
         for cid in self.compartment_ids:
             self._get_sub_compartment_ids(cid)
         return self.compartment_ids
