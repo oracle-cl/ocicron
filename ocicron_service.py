@@ -121,13 +121,13 @@ class OCI:
                     self.compute_instances.append(vm)         
         return self.compute_instances
     
+    #Return list of OCID of a given tag, key combination
     def filter_by_tags(self, tags, service='compute'):
         """
         returns list if OCID of a given tags
         tags = {"Stop":"20","Start": "08","Weekly_stop":"Yes"}
         """
         OCIDS=[]
-
         if service == 'compute':
             for vm in self.compute_instances:
                 #compare dictionary and length should be the same
@@ -136,18 +136,17 @@ class OCI:
         elif service == 'database':
             for db in self.db_systems:
                 if len(tags.items() & db.freeform_tags.items()) == len(tags.items()):
-                    OCIDS.append(db.id)
+                    OCIDS.append({"compartment_id": db.compartment_id, "ocid":db.id})
         else:
             raise Exception("Unrecognize service: either compute or database are acccepted")
         
         return OCIDS
     
+    # Discover all posible tag combinations found on freeform_tags
     def _discover_tags(self, tag_keys=TAG_KEYS, service='compute'):
         """
-        Discovery tag keys and values from compute freeform_tags
-
         example: discover_tag({"Stop", "Start", "Weekly_stop"})
-        result: [{'Start': '08', 'Stop': '20', 'Weekly_stop': 'No'}, {'Start': '08', 'Stop': '20', 'Weekly_stop': 'Yes'}]
+        result: [{'Start': '08', 'Stop': '20', 'Weekly_stop': 'No'}, {'Start': '08', 'Stop': '21', 'Weekly_stop': 'Yes'}]
         """
         result = []
         if service == 'compute':
@@ -171,7 +170,8 @@ class OCI:
 
         return result
 
-    def vms_by_tags(self, tag_keys=TAG_KEYS):   
+    #return VMs OCIDs from al tags found
+    def vms_by_tags(self):   
 
         tags = self._discover_tags()
         result = []
@@ -189,13 +189,13 @@ class OCI:
         for ocid in instances:
             self.compute.instance_action(ocid, action)
 
+    #Database service methods
     def get_all_dbsystems(self):
         """
         Return all dbsystems in a given compartment
         """
         if len(self.compartment_ids) <= 0:
             return
-
 
         for compartment_id in self.compartment_ids:   
             response = self.database.list_db_systems(
@@ -216,29 +216,25 @@ class OCI:
                          
         return self.db_systems
     
-    def get_all_db_nodes(self, db_system_ids):
-        """
-        Return all DB Nodes in a given compartment
-        """
-        if len(db_system_ids) <= 0:
-            return self.db_nodes
 
-        for compartment_id in self.compartment_ids:
-            for ocid in db_system_ids:
-                response = self.database.list_db_nodes(
-                    compartment_id=compartment_id,
-                    db_system_id=ocid)
-                self.db_nodes.extend(response.data)        
-        return self.db_nodes
+    def get_db_nodes(self, compartment_id, db_system_id):
+        """
+        Return DB Nodes in a given compartment and db system
+        """
+        response = self.database.list_db_nodes(
+            compartment_id=compartment_id,
+            db_system_id=db_system_id)        
+        return response.data
     
-    def dbs_by_tags(self, tag_keys=TAG_KEYS):   
+    def dbs_by_tags(self):   
 
         tags = self._discover_tags(service='database')
         result = []
         for tag in tags:
             db_group = {}
             db_group["tags"] = tag
-            db_group["dbOCID"] = self.filter_by_tags(tag, service='database')
+            for db in self.filter_by_tags(tag, service='database'):
+                db_group["dbnodeOCID"] = [ node.id for node in self.get_db_nodes(db["compartment_id"], db["ocid"])]
             result.append(db_group)
         return result
 
