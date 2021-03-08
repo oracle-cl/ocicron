@@ -10,9 +10,9 @@ ocicron is an utitly tool to schedule OCI actions to start or stop compute and d
 
 ## Install
 
-´´´shell
+```
 pip3 install -r requirements.txt
-´´´
+```
 
 ## How to use it 
 
