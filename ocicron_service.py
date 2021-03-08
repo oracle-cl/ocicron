@@ -48,14 +48,15 @@ class OCI:
 
         if self.auth_type == "principal":
             self.signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
-            if self.region is not None:
-                self.compute = oci.core.ComputeClient(config={'region':self.region}, signer=self.signer, retry_strategy=custom_retry_strategy)
-                self.identity = oci.identity.IdentityClient(config={'region':self.region}, signer=self.signer, retry_strategy=custom_retry_strategy)
-                self.database = oci.database.DatabaseClient(config={'region':self.region}, signer=self.signer, retry_strategy=custom_retry_strategy)
+            if region is not None:
+                config = {'region':self.region}
             else:
-                self.compute = oci.core.ComputeClient(config={}, signer=self.signer, retry_strategy=custom_retry_strategy)
-                self.identity = oci.identity.IdentityClient(config={}, signer=self.signer, retry_strategy=custom_retry_strategy)
-                self.database = oci.database.DatabaseClient(config={}, signer=self.signer, retry_strategy=custom_retry_strategy)
+                config = {}
+            
+            self.compute = oci.core.ComputeClient(config=config, signer=self.signer, retry_strategy=custom_retry_strategy)
+            self.identity = oci.identity.IdentityClient(config=config, signer=self.signer, retry_strategy=custom_retry_strategy)
+            self.database = oci.database.DatabaseClient(config=config, signer=self.signer, retry_strategy=custom_retry_strategy)
+        
         elif self.auth_type == "config":
             self.config = oci.config.from_file(file_location=config_file, profile_name=profile)
             if self.region is not None:
@@ -63,6 +64,7 @@ class OCI:
             self.compute = oci.core.ComputeClient(self.config, retry_strategy=custom_retry_strategy)
             self.identity = oci.identity.IdentityClient(self.config, retry_strategy=custom_retry_strategy)
             self.database = oci.database.DatabaseClient(self.config, retry_strategy=custom_retry_strategy)
+        
         else:
             raise Exception("Unrecognize authentication type: auth_type=(principal|config)")
         
