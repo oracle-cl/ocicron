@@ -28,27 +28,23 @@ def schedule_commands():
     """
     this function will read database and will schedule command execution
     """
+    #Get all entries in the vm table and the db table
     result = db.vm_table.all()
+    result.extend(db.dbsys_table.all())
 
     for r in result:
-        if r['Weekend_stop'] == 'No':
-            schedule, command = cron.cron_generator(r['Stop'], 'no', r['region'], 'stop')
+            schedule, command = cron.cron_generator(r['Stop'], r['Weekend_stop'].lower(), r['region'], 'stop')
             if not cron.is_schedule(command):
                 cron.new(command, schedule)
-            schedule, command = cron.cron_generator(r['Start'], 'no', r['region'], 'start')
-            if not cron.is_schedule(command):
-                cron.new(command, schedule)
-        else:
-            schedule, command = cron.cron_generator(r['Stop'], 'yes', r['region'], 'stop')
-            if not cron.is_schedule(command):
-                cron.new(command, schedule)
-            schedule, command = cron.cron_generator(r['Start'], 'yes', r['region'], 'start')
+            schedule, command = cron.cron_generator(r['Start'], r['Weekend_stop'].lower(), r['region'], 'start') 
             if not cron.is_schedule(command):
                 cron.new(command, schedule)
 
 def generate_entries(regions):
 
-    entries = []
+    entries = {}
+    vm_entries = []
+    dbs_entries = []
     for region in regions:
         try:
             conn = OCI(auth_type=DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE, region=region)
@@ -59,12 +55,18 @@ def generate_entries(regions):
         conn.compartment_ids = db.cid_table.all()[0]['compartments']
         #get all instances
         try:
+            #Get all VMs
             conn.get_all_instances()
+            #Get all DB systems
+            conn.get_all_dbsystems()
         except Exception as e:
             logging.error("Exception occurred", exc_info=True)
             sys.exit()
+        #filtered VMs
         filter_vms = conn.vms_by_tags()
-        #vm_entries = []
+        #filtered DBs
+        filter_dbs = conn.dbs_by_tags()
+        #Generate entry and collect them
         for vms in filter_vms:
             entry = {
                 'region':region,
@@ -73,7 +75,20 @@ def generate_entries(regions):
                 'Weekend_stop':vms['tags']['Weekend_stop'],
                 'vmOCID':vms['vmOCID']
             }
-            entries.append(entry)
+            vm_entries.append(entry)
+        
+        for dbs in filter_dbs:
+            entry = {
+                'region':region,
+                'Start':dbs['tags']['Start'],
+                'Stop':dbs['tags']['Stop'],
+                'Weekend_stop':dbs['tags']['Weekend_stop'],
+                'dbnodeOCID':dbs['dbnodeOCID']
+            }
+            dbs_entries.append(entry)
+        
+        entries['vms'] = vm_entries
+        entries['db_nodes'] = dbs_entries        
     return entries
 
 #init function
@@ -97,8 +112,12 @@ def init(comparments_ids=COMPARTMENTS, regions=REGIONS):
     db.cid_table.insert({'compartments': oci1.compartment_ids})
     
     #Scan region and generate entries to the database
-    for entry in generate_entries(REGIONS):
-        db.vm_table.insert(entry)
+    entries = generate_entries(REGIONS)
+    for vm in entries['vms']:
+        db.vm_table.insert(vm)
+    
+    for nodes in entries['db_nodes']:
+        db.dbsys_table.insert(nodes)
     
     #schedule sync command - check this as well
     if not cron.is_schedule(DEFAULT_SYNC_COMMAND):
@@ -121,34 +140,64 @@ def vm_execute(region, action, hour, weekend_stop, **kwargs):
     
     elif action == 'start':
         result = db.vm_table.search((db.query.region == region) & (db.query.Weekend_stop == weekend_stop.capitalize()) & (db.query.Start == hour))
-        action = 'START'
     else:
         raise Exception("unrecognize action (stop|start)")
     
     if len(result) == 0:
-        logging.warning('No result found for given query -- region:{}, action:{}, hour{}, weekend_stop: {}'.format(region, action, hour, weekend_stop))
-        sys.exit()
+        logging.warning('No VM result found for given query -- region:{}, action:{}, hour:{}, weekend_stop:{}'.format(region, action, hour, weekend_stop))
     else:
         logging.info('{} VM OCIDs match with query'.format(result[0]['vmOCID']))
 
-    #print(result)
-    #connect to OCI
-    try:
-        conn = OCI(auth_type=DEFAULT_AUTH_TYPE, 
-            profile=DEFAULT_PROFILE, 
-            region=region)
-    except Exception as e:
-        logging.error(e, exc_info=True)
-        sys.exit()
+        #connect to OCI
+        try:
+            conn = OCI(auth_type=DEFAULT_AUTH_TYPE, 
+                profile=DEFAULT_PROFILE, 
+                region=region)
+        except Exception as e:
+            logging.error(e, exc_info=True)
 
-    #given a list of ocid execute action
-    try:
-        conn.instance_action(result[0]['vmOCID'], action)
-    except Exception as e:
-        logging.error("Exception occurred", exc_info=True)
-        sys.exit(9)
+        #given a list of ocid execute action
+        try:
+            logging.info("Executing action: {} in region: {} at: {} and Weekend_stop: {}".format(action, region, hour, weekend_stop))
+            conn.instance_action(result[0]['vmOCID'], action.upper())
+        except Exception as e:
+            logging.error("Exception occurred", exc_info=True)
 
+def db_execute(region, action, hour, weekend_stop, **kwargs):
+    """
+    This function will read argmuments and will find in local database to execute according
 
+    0 20 * * * python ocicron.py --region us-ashburn-1 --action stop --at 09 --weekend-stop yes
+    """
+    
+    if action == 'stop':
+        result = db.dbsys_table.search((db.query.region == region) & (db.query.Weekend_stop == weekend_stop.capitalize()) & (db.query.Stop == hour))    
+    elif action == 'start':
+        result = db.dbsys_table.search((db.query.region == region) & (db.query.Weekend_stop == weekend_stop.capitalize()) & (db.query.Start == hour))
+    else:
+        raise Exception("unrecognize action (stop|start)")
+    
+    if len(result) == 0:
+        logging.warning('No DB node result found for given query -- region:{}, action:{}, hour:{}, weekend_stop:{}'.format(region, action, hour, weekend_stop))
+    else:
+        logging.info('{} DB nodes OCIDs match with query'.format(result[0]['dbnodeOCID']))
+
+        #connect to OCI
+        try:
+            conn = OCI(auth_type=DEFAULT_AUTH_TYPE, 
+                profile=DEFAULT_PROFILE, 
+                region=region)
+        except Exception as e:
+            logging.error(e, exc_info=True)
+
+        #given a list of ocid execute action
+        try:
+            logging.info("Executing action: {} in region: {} at: {} and Weekend_stop: {}".format(action, region, hour, weekend_stop))
+            conn.database_action(result[0]['dbnodeOCID'], action.upper())
+        except Exception as e:
+            logging.error("Exception occurred", exc_info=True)
+
+#sync command to update entries
 def sync(comparments_ids=COMPARTMENTS, regions=REGIONS):
     """
     This function will crawl compartments and vms tags and update database and crons if needed 
@@ -168,9 +217,13 @@ def sync(comparments_ids=COMPARTMENTS, regions=REGIONS):
     #Insert compartments in database
         db.cid_table.update({'compartments': oci1.compartment_ids})
 
-    #Scan region and generate entries to the database 
-    for entry in generate_entries(REGIONS):
-        db.vm_table.insert(entry)
+    #Scan region and generate entries to the database
+    entries = generate_entries(REGIONS)
+    for vm in entries['vms']:
+        db.vm_table.insert(vm)
+    
+    for nodes in entries['db_nodes']:
+        db.dbsys_table.insert(nodes)
     
     #clean jobs
     cron.clean_jobs('ocicron.py --region')
@@ -217,8 +270,12 @@ def cli():
 
 if __name__ == "__main__":
     
+    #argument parser
     args = cli()
+    #find and execute action over VMs
     vm_execute(args.region, args.action, args.at, args.weekend_stop)
+    #find and execute action over Database systems
+    db_execute(args.region, args.action, args.at, args.weekend_stop)
 
 
 
