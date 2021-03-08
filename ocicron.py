@@ -127,7 +127,7 @@ def init(comparments_ids=COMPARTMENTS, regions=REGIONS):
     schedule_commands()
     logging.info('Start/Stop commands has been scheduled')
 
-def vm_execute(region, action, hour, weekend_stop, **kwargs):
+def execute(region, action, hour, weekend_stop, **kwargs):
     """
     This function will read argmuments and will find in local database to execute according
 
@@ -135,65 +135,41 @@ def vm_execute(region, action, hour, weekend_stop, **kwargs):
     """
     
     if action == 'stop':
-        result = db.vm_table.search((db.query.region == region) & (db.query.Weekend_stop == weekend_stop.capitalize()) & (db.query.Stop == hour))
-        action = 'SOFTSTOP'
-    
+        vm_query = db.vm_table.search((db.query.region == region) & (db.query.Weekend_stop == weekend_stop.capitalize()) & (db.query.Stop == hour))
+        dbs_query = db.dbsys_table.search((db.query.region == region) & (db.query.Weekend_stop == weekend_stop.capitalize()) & (db.query.Stop == hour))  
     elif action == 'start':
-        result = db.vm_table.search((db.query.region == region) & (db.query.Weekend_stop == weekend_stop.capitalize()) & (db.query.Start == hour))
+        vm_query = db.vm_table.search((db.query.region == region) & (db.query.Weekend_stop == weekend_stop.capitalize()) & (db.query.Start == hour))
+        dbs_query = db.dbsys_table.search((db.query.region == region) & (db.query.Weekend_stop == weekend_stop.capitalize()) & (db.query.Start == hour))
     else:
         raise Exception("unrecognize action (stop|start)")
-    
-    if len(result) == 0:
-        logging.warning('No VM result found for given query -- region:{}, action:{}, hour:{}, weekend_stop:{}'.format(region, action, hour, weekend_stop))
+
+    #connect to OCI
+    try:
+        conn = OCI(auth_type=DEFAULT_AUTH_TYPE, 
+            profile=DEFAULT_PROFILE, 
+            region=region)
+    except Exception as e:
+        logging.error(e, exc_info=True)
+
+    #Compute Service
+    if len(vm_query) <= 0:
+        logging.warning('No VM resources found for this given query -- region:{}, action:{}, hour:{}, weekend_stop:{}'.format(region, action, hour, weekend_stop))
     else:
-        logging.info('{} VM OCIDs match with query'.format(result[0]['vmOCID']))
-
-        #connect to OCI
         try:
-            conn = OCI(auth_type=DEFAULT_AUTH_TYPE, 
-                profile=DEFAULT_PROFILE, 
-                region=region)
+            logging.info("Executing {} action in Compute service, in region: {} at: {} and Weekend_stop: {}".format(action, region, hour, weekend_stop))
+            if action == 'stop':
+                action = 'softstop'
+            conn.instance_action(vm_query[0]['vmOCID'], action.upper())
         except Exception as e:
-            logging.error(e, exc_info=True)
-
-        #given a list of ocid execute action
-        try:
-            logging.info("Executing action: {} in region: {} at: {} and Weekend_stop: {}".format(action, region, hour, weekend_stop))
-            conn.instance_action(result[0]['vmOCID'], action.upper())
-        except Exception as e:
-            logging.error("Exception occurred", exc_info=True)
-
-def db_execute(region, action, hour, weekend_stop, **kwargs):
-    """
-    This function will read argmuments and will find in local database to execute according
-
-    0 20 * * * python ocicron.py --region us-ashburn-1 --action stop --at 09 --weekend-stop yes
-    """
+            logging.error("Exception occurred", exc_info=True)   
     
-    if action == 'stop':
-        result = db.dbsys_table.search((db.query.region == region) & (db.query.Weekend_stop == weekend_stop.capitalize()) & (db.query.Stop == hour))    
-    elif action == 'start':
-        result = db.dbsys_table.search((db.query.region == region) & (db.query.Weekend_stop == weekend_stop.capitalize()) & (db.query.Start == hour))
+    #Database Service
+    if len(dbs_query) <= 0:
+        logging.warning('No DB system resources found for this given query -- region:{}, action:{}, hour:{}, weekend_stop:{}'.format(region, action, hour, weekend_stop))
     else:
-        raise Exception("unrecognize action (stop|start)")
-    
-    if len(result) == 0:
-        logging.warning('No DB node result found for given query -- region:{}, action:{}, hour:{}, weekend_stop:{}'.format(region, action, hour, weekend_stop))
-    else:
-        logging.info('{} DB nodes OCIDs match with query'.format(result[0]['dbnodeOCID']))
-
-        #connect to OCI
         try:
-            conn = OCI(auth_type=DEFAULT_AUTH_TYPE, 
-                profile=DEFAULT_PROFILE, 
-                region=region)
-        except Exception as e:
-            logging.error(e, exc_info=True)
-
-        #given a list of ocid execute action
-        try:
-            logging.info("Executing action: {} in region: {} at: {} and Weekend_stop: {}".format(action, region, hour, weekend_stop))
-            conn.database_action(result[0]['dbnodeOCID'], action.upper())
+            logging.info("Executing {} action in database service, in region: {} at: {} and Weekend_stop: {}".format(action, region, hour, weekend_stop))
+            conn.database_action(dbs_query[0]['dbnodeOCID'], action.upper())
         except Exception as e:
             logging.error("Exception occurred", exc_info=True)
 
@@ -272,10 +248,9 @@ if __name__ == "__main__":
     
     #argument parser
     args = cli()
-    #find and execute action over VMs
-    vm_execute(args.region, args.action, args.at, args.weekend_stop)
-    #find and execute action over Database systems
-    db_execute(args.region, args.action, args.at, args.weekend_stop)
+    #find and execute action over VMs and DB systems
+    execute(args.region, args.action, args.at, args.weekend_stop)
+
 
 
 
