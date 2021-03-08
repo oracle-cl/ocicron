@@ -51,8 +51,7 @@ class OCI:
             if region is not None:
                 config = {'region':self.region}
             else:
-                config = {}
-            
+                config = {}            
             self.compute = oci.core.ComputeClient(config=config, signer=self.signer, retry_strategy=custom_retry_strategy)
             self.identity = oci.identity.IdentityClient(config=config, signer=self.signer, retry_strategy=custom_retry_strategy)
             self.database = oci.database.DatabaseClient(config=config, signer=self.signer, retry_strategy=custom_retry_strategy)
@@ -188,6 +187,8 @@ class OCI:
         """
         Perform a given intance action of a given list of VM OCID
         """
+        if len(instances) <= 0:
+            return
         for ocid in instances:
             self.compute.instance_action(ocid, action)
 
@@ -244,6 +245,8 @@ class OCI:
         """
         Perform action of a given list of db nodes OCID
         """
+        if len(db_node_ids) <= 0:
+            return
         for ocid in db_node_ids:
             self.database.db_node_action(ocid, action)
 
