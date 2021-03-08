@@ -21,12 +21,14 @@ The first thing you need to do is edit the ocicron.py with the regions you need 
 
 ### step 2
 Execute initialization. This will create the ocicron database and will populate the user's cron with the schedule acording to the tags Star, Stop, Weekend_stop
-```python
+
+```
 python ocicron.py init
 ```
 ### step 3 (Optional)
 If you know there is a change you could also sync oci with the ocicron database and cron
-```python
+
+```
 python ocicron.py sync
 ```
 
