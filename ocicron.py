@@ -7,14 +7,12 @@ from ocicron_service import OCI, ScheduleDB, Schedule
 
 
 DEFAULT_LOCATION=os.getcwd()
-REGIONS=['us-ashburn-1', 'sa-santiago-1']
-#COMPARTMENTS=["ocid1.compartment.oc1..aaaaaaaa4bybtq6axk7odphukoulaqsq6zdewp7kgqunjxhw3icuohglhnwa"]
+REGIONS=['us-ashburn-1']
 COMPARTMENTS=[]
-DEFAULT_AUTH_TYPE='config'
+DEFAULT_AUTH_TYPE='principal'
 DEFAULT_PROFILE="DEFAULT"
 DEFAULT_SYNC_SCHEDULE='0 23 1 * *'
 DEFAULT_SYNC_COMMAND='cd {} && ./ocicron.py sync'.format(DEFAULT_LOCATION)
-CRONTAB_FILE_NAME=os.path.join(os.getcwd(),'ocicron.tab')
 
 #ocicron Database
 db = ScheduleDB()
