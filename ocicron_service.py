@@ -1,5 +1,6 @@
 import os
 import oci
+import logging
 from tinydb import TinyDB, Query
 from crontab import CronTab
 
@@ -7,6 +8,9 @@ from crontab import CronTab
 DEFAULT_LOCATION=os.getcwd()
 DB_FILE_NAME="scheduleDB.json"
 TAG_KEYS={"Stop", "Start", "Weekend_stop"}
+
+#Logging
+logging.basicConfig(filename='ocicron.log', level=logging.INFO, format='%(asctime)s :: %(levelname)s :: %(message)s')
 
 #Fix Too Many request error
 custom_retry_strategy = oci.retry.RetryStrategyBuilder(
@@ -65,13 +69,24 @@ class OCI:
             self.database = oci.database.DatabaseClient(self.config, retry_strategy=custom_retry_strategy)
         
         else:
-            raise Exception("Unrecognize authentication type: auth_type=(principal|config)")
+            logging.exception("Unrecognize authentication type: auth_type=(principal|config)")
         
+        self.suscribed_regions = []
         self.compartment_ids = []
         self.compute_instances = []
         self.db_systems = []
         self.db_nodes = []
     
+    def get_suscribed_regions(self):
+
+        if self.auth_type == "config":
+            response = self.identity.list_region_subscriptions(self.config['tenancy'])
+        else:
+            response = self.identity.list_region_subscriptions(self.signer.tenancy_id)
+        
+        for r in response.data:
+            self.suscribed_regions.append(r.region_name)
+        
     def _get_sub_compartment_ids(self, cid):
         
         if cid not in self.compartment_ids:
@@ -139,7 +154,7 @@ class OCI:
                 if len(tags.items() & db.freeform_tags.items()) == len(tags.items()):
                     OCIDS.append({"compartment_id": db.compartment_id, "ocid":db.id})
         else:
-            raise Exception("Unrecognize service: either compute or database are acccepted")
+            logging.error("Unrecognize service: either compute or database are acccepted")
         
         return OCIDS
     
@@ -167,7 +182,7 @@ class OCI:
                     if tags not in result:
                         result.append(tags)
         else:
-            raise Exception("Unrecognize service: either compute or database are acccepted")
+            logging.error("Unrecognize service: either compute or database are acccepted")
 
         return result
 
@@ -183,14 +198,18 @@ class OCI:
             result.append(vm_group)
         return result
 
-    def instance_action(self, instances, action):
+    def instance_action(self, instance_ids, action):
         """
         Perform a given intance action of a given list of VM OCID
         """
-        if len(instances) <= 0:
+        if len(instance_ids) <= 0:
             return
-        for ocid in instances:
-            self.compute.instance_action(ocid, action)
+        print(instance_ids)
+        for ocid in instance_ids:
+            try:     
+                self.compute.instance_action(ocid, action)
+            except Exception as err:
+                logging.error("Unable to perform action: {} - instance OCID: {} - Error: {}".format(action, ocid, err))
 
     #Database service methods
     def get_all_dbsystems(self):
@@ -248,7 +267,10 @@ class OCI:
         if len(db_node_ids) <= 0:
             return
         for ocid in db_node_ids:
-            self.database.db_node_action(ocid, action)
+            try:
+                self.database.db_node_action(ocid, action)
+            except Exception as err:
+                logging.error("Unable to perform action: {} - database OCID: {} - Error: {}".format(action, ocid, err))
 
 class ScheduleDB:
 
