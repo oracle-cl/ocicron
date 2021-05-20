@@ -1,26 +1,23 @@
 #!/usr/bin/python3
+from logging import exception
 import os
 import sys
-import logging
 import argparse
-from ocicron_service import OCI, ScheduleDB, Schedule
+from ocicron_service import OCI, ScheduleDB, Schedule, logging
 
 
 DEFAULT_LOCATION=os.getcwd()
-REGIONS=['us-ashburn-1']
 COMPARTMENTS=[]
 DEFAULT_AUTH_TYPE='principal'
 DEFAULT_PROFILE="DEFAULT"
-DEFAULT_SYNC_SCHEDULE='0 23 1 * *'
+DEFAULT_SYNC_SCHEDULE='0 23 * * *'
 DEFAULT_SYNC_COMMAND='cd {} && ./ocicron.py sync'.format(DEFAULT_LOCATION)
+
+#Crontab
+cron = Schedule()
 
 #ocicron Database
 db = ScheduleDB()
-#Crontab
-cron = Schedule()
-#Logging
-logging.basicConfig(filename='ocicron.log', level=logging.INFO, format='%(asctime)s :: %(levelname)s :: %(message)s')
-
 
 def schedule_commands():
     """
@@ -90,27 +87,31 @@ def generate_entries(regions):
     return entries
 
 #init function
-def init(comparments_ids=COMPARTMENTS, regions=REGIONS):
+def init(comparments_ids=COMPARTMENTS):
+
 
     logging.info('ocicron is initiating')
     if len(db.vm_table.all()) > 0 or len(db.cid_table.all()) > 0:
         logging.info('Database already exists')
         sys.exit()
     
-    oci1 = OCI(auth_type=DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE)   
+    oci = OCI(auth_type=DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE)
+
+    #get account suscribe regions
+    oci.get_suscribed_regions()
 
     if len(COMPARTMENTS) <= 0:
-        oci1.compartment_crawler()
+        oci.compartment_crawler()
     else:
         #crawl compartments
         for cid in comparments_ids:
-            oci1.compartment_crawler(cid)
+            oci.compartment_crawler(cid)
 
     #Insert compartments in database
-    db.cid_table.insert({'compartments': oci1.compartment_ids})
+    db.cid_table.insert({'compartments': oci.compartment_ids})
     
     #Scan region and generate entries to the database
-    entries = generate_entries(REGIONS)
+    entries = generate_entries(oci.suscribed_regions)
     for vm in entries['vms']:
         db.vm_table.insert(vm)
     
@@ -139,7 +140,7 @@ def execute(region, action, hour, weekend_stop, **kwargs):
         vm_query = db.vm_table.search((db.query.region == region) & (db.query.Weekend_stop == weekend_stop.capitalize()) & (db.query.Start == hour))
         dbs_query = db.dbsys_table.search((db.query.region == region) & (db.query.Weekend_stop == weekend_stop.capitalize()) & (db.query.Start == hour))
     else:
-        raise Exception("unrecognize action (stop|start)")
+        logging.exception("unrecognize action (stop|start)")
 
     #connect to OCI
     try:
@@ -153,13 +154,12 @@ def execute(region, action, hour, weekend_stop, **kwargs):
     if len(vm_query) <= 0:
         logging.warning('No VM resources found for this given query -- region:{}, action:{}, hour:{}, weekend_stop:{}'.format(region, action, hour, weekend_stop))
     else:
-        try:
-            logging.info("Executing {} action in Compute service, in region: {} at: {} and Weekend_stop: {}".format(action, region, hour, weekend_stop))
-            if action == 'stop':
-                action = 'softstop'
-            conn.instance_action(vm_query[0]['vmOCID'], action.upper())
-        except Exception as e:
-            logging.error("Exception occurred", exc_info=True)   
+        logging.info("Executing {} action in Compute service, in region: {} at: {} and Weekend_stop: {}".format(action, region, hour, weekend_stop))
+        if action == 'stop':
+            action = 'softstop'
+
+        #Execute Instance action on returned instances OCID
+        conn.instance_action(vm_query[0]['vmOCID'], action.upper())
     
     #Database Service
     if len(dbs_query) <= 0:
@@ -169,30 +169,43 @@ def execute(region, action, hour, weekend_stop, **kwargs):
             logging.info("Executing {} action in database service, in region: {} at: {} and Weekend_stop: {}".format(action, region, hour, weekend_stop))
             conn.database_action(dbs_query[0]['dbnodeOCID'], action.upper())
         except Exception as e:
-            logging.error("Exception occurred", exc_info=True)
+            logging.error(e)
 
 #sync command to update entries
-def sync(comparments_ids=COMPARTMENTS, regions=REGIONS):
+def sync(comparments_ids=COMPARTMENTS):
     """
     This function will crawl compartments and vms tags and update database and crons if needed 
     """
-
     logging.info('ocicron is syncing')
-    oci1 = OCI(auth_type=DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE)   
+
+    oci = OCI(auth_type=DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE)   
+    #get account suscribe regions
+    oci.get_suscribed_regions()
 
     if len(COMPARTMENTS) <= 0:
-        oci1.compartment_crawler()
+        oci.compartment_crawler()
     else:
         #crawl compartments
         for cid in comparments_ids:
-            oci1.compartment_crawler(cid)
+            oci.compartment_crawler(cid)
+    
+    #
+    try:
+        db.flush()
+    except Exception as err:
+        logging.exception(err)
+    
+    #call databse table object
+    db.vm_table
+    db.dbsys_table
+
     #check if compartments hasn't change
-    if len(db.cid_table.search(db.query.compartments == oci1.compartment_ids)) == 0:
+    if len(db.cid_table.search(db.query.compartments == oci.compartment_ids)) == 0:
     #Insert compartments in database
-        db.cid_table.update({'compartments': oci1.compartment_ids})
+        db.cid_table.update({'compartments': oci.compartment_ids})
 
     #Scan region and generate entries to the database
-    entries = generate_entries(REGIONS)
+    entries = generate_entries(oci.suscribed_regions)
     for vm in entries['vms']:
         db.vm_table.insert(vm)
     
