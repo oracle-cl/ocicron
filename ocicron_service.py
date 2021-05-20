@@ -70,6 +70,7 @@ class OCI:
         
         else:
             logging.exception("Unrecognize authentication type: auth_type=(principal|config)")
+            
         
         self.suscribed_regions = []
         self.compartment_ids = []
@@ -204,7 +205,6 @@ class OCI:
         """
         if len(instance_ids) <= 0:
             return
-        print(instance_ids)
         for ocid in instance_ids:
             try:     
                 self.compute.instance_action(ocid, action)
@@ -284,6 +284,11 @@ class ScheduleDB:
 
         #Query
         self.query = Query()
+
+
+    def flush(self):
+        return self.db.drop_table('vms') and self.db.drop_table('db')
+
 
 class Schedule:
 
