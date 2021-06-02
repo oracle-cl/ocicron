@@ -154,7 +154,7 @@ def execute(region, action, hour, weekend_stop, **kwargs):
     if len(vm_query) <= 0:
         logging.warning('No VM resources found for this given query -- region:{}, action:{}, hour:{}, weekend_stop:{}'.format(region, action, hour, weekend_stop))
     else:
-        logging.info("Executing {} action in Compute service, in region: {} at: {} and Weekend_stop: {}".format(action, region, hour, weekend_stop))
+        logging.info("Executing {} action in Compute service, in region: {} at: {} and Weekend_stop: {} on {} instances".format(action, region, hour, weekend_stop, len(vm_query)))
         if action == 'stop':
             action = 'softstop'
 

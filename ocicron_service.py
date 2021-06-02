@@ -1,6 +1,7 @@
 import os
 import oci
 import logging
+import time
 from tinydb import TinyDB, Query
 from crontab import CronTab
 
@@ -150,10 +151,16 @@ class OCI:
                 #compare dictionary and length should be the same
                 if len(tags.items() & vm.freeform_tags.items()) == len(tags.items()):
                     OCIDS.append(vm.id)
+                    logging.info("VM agregada:" + vm.display_name + " id: " + vm.id)
+                else:
+                    logging.info("VM descartada:" + vm.display_name)
         elif service == 'database':
             for db in self.db_systems:
                 if len(tags.items() & db.freeform_tags.items()) == len(tags.items()):
                     OCIDS.append({"compartment_id": db.compartment_id, "ocid":db.id})
+                    logging.info("DB agregada:" + db.display_name + " id: " + db.id)
+                else:
+                    logging.info("DB descartada:" + db.display_name)
         else:
             logging.error("Unrecognize service: either compute or database are acccepted")
         
@@ -204,10 +211,13 @@ class OCI:
         Perform a given intance action of a given list of VM OCID
         """
         if len(instance_ids) <= 0:
+            logging.info("No instances IDs")
             return
         for ocid in instance_ids:
             try:     
+                logging.info("Try to : {} - instance OCID: {}".format(action, ocid))
                 self.compute.instance_action(ocid, action)
+                time.sleep(1)
             except Exception as err:
                 logging.error("Unable to perform action: {} - instance OCID: {} - Error: {}".format(action, ocid, err))
 
@@ -268,7 +278,9 @@ class OCI:
             return
         for ocid in db_node_ids:
             try:
+                logging.info("Try to : {} - db_node OCID: {}".format(action, ocid))
                 self.database.db_node_action(ocid, action)
+                time.sleep(1)
             except Exception as err:
                 logging.error("Unable to perform action: {} - database OCID: {} - Error: {}".format(action, ocid, err))
 
