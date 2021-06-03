@@ -90,7 +90,7 @@ def generate_entries(regions):
 def init(comparments_ids=COMPARTMENTS):
 
 
-    logging.info('ocicron is initiating')
+    logging.info("===================== Init Start ==========================")
     if len(db.vm_table.all()) > 0 or len(db.cid_table.all()) > 0:
         logging.info('Database already exists')
         sys.exit()
@@ -125,6 +125,7 @@ def init(comparments_ids=COMPARTMENTS):
     #Loop over regions to fund records and create cronjobs
     schedule_commands()
     logging.info('Start/Stop commands has been scheduled')
+    logging.info("===================== Init End ==========================")
 
 def execute(region, action, hour, weekend_stop, **kwargs):
     """
@@ -132,6 +133,7 @@ def execute(region, action, hour, weekend_stop, **kwargs):
 
     0 20 * * * python ocicron.py --region us-ashburn-1 --action stop --at 09 --weekend-stop yes
     """
+    logging.info("===================== Execution Start ==========================")
     
     if action == 'stop':
         vm_query = db.vm_table.search((db.query.region == region) & (db.query.Weekend_stop == weekend_stop.capitalize()) & (db.query.Stop == hour))
@@ -170,13 +172,14 @@ def execute(region, action, hour, weekend_stop, **kwargs):
             conn.database_action(dbs_query[0]['dbnodeOCID'], action.upper())
         except Exception as e:
             logging.error(e)
+    logging.info("===================== Execution END ==========================")
 
 #sync command to update entries
 def sync(comparments_ids=COMPARTMENTS):
     """
     This function will crawl compartments and vms tags and update database and crons if needed 
     """
-    logging.info('ocicron is syncing')
+    logging.info("===================== Sync Start ==========================")
 
     oci = OCI(auth_type=DEFAULT_AUTH_TYPE, profile=DEFAULT_PROFILE)   
     #get account suscribe regions
@@ -216,6 +219,7 @@ def sync(comparments_ids=COMPARTMENTS):
     cron.clean_jobs('ocicron.py --region')
     #query and create cronjobs
     schedule_commands()
+    logging.info("===================== Sync End ==========================")
 
 def cli():
     """

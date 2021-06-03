@@ -7,6 +7,7 @@ from crontab import CronTab
 
 
 DEFAULT_LOCATION=os.getcwd()
+RPM_APICALL_LIMIT=10
 DB_FILE_NAME="scheduleDB.json"
 TAG_KEYS={"Stop", "Start", "Weekend_stop"}
 
@@ -216,8 +217,9 @@ class OCI:
         for ocid in instance_ids:
             try:     
                 logging.info("Try to : {} - instance OCID: {}".format(action, ocid))
-                self.compute.instance_action(ocid, action)
-                time.sleep(1)
+                status = self.compute.instance_action(ocid, action).status
+                logging.info("Status : {} ".format(str(status)))
+                time.sleep(60/RPM_APICALL_LIMIT)
             except Exception as err:
                 logging.error("Unable to perform action: {} - instance OCID: {} - Error: {}".format(action, ocid, err))
 
@@ -280,7 +282,7 @@ class OCI:
             try:
                 logging.info("Try to : {} - db_node OCID: {}".format(action, ocid))
                 self.database.db_node_action(ocid, action)
-                time.sleep(1)
+                time.sleep(60/RPM_APICALL_LIMIT)
             except Exception as err:
                 logging.error("Unable to perform action: {} - database OCID: {} - Error: {}".format(action, ocid, err))
 

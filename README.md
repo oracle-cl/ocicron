@@ -52,5 +52,13 @@ If you know there is a change you could also sync oci with the ocicron database 
 ```
 python ocicron.py sync
 ```
+## Troubleshooting
+
+### ocicron.log
+
+- Each RUN (execute, init, sync) has messages on Start & End Activity
+- init & sync Show details on machines, add or discard for the process
+- Execution Show for each machine before and after execution
+
 
 Cheers ;-)
