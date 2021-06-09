@@ -161,7 +161,8 @@ def execute(region, action, hour, weekend_stop, **kwargs):
             action = 'softstop'
 
         #Execute Instance action on returned instances OCID
-        conn.instance_action(vm_query[0]['vmOCID'], action.upper())
+        for grupovm in vm_query:
+            conn.instance_action(grupovm['vmOCID'], action.upper())
     
     #Database Service
     if len(dbs_query) <= 0:
@@ -169,7 +170,8 @@ def execute(region, action, hour, weekend_stop, **kwargs):
     else:
         try:
             logging.info("Executing {} action in database service, in region: {} at: {} and Weekend_stop: {}".format(action, region, hour, weekend_stop))
-            conn.database_action(dbs_query[0]['dbnodeOCID'], action.upper())
+            for grupodb in dbs_query:
+                conn.database_action(grupodb['dbnodeOCID'], action.upper())
         except Exception as e:
             logging.error(e)
     logging.info("===================== Execution END ==========================")
