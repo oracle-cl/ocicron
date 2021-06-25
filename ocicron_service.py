@@ -154,7 +154,7 @@ class OCI:
                     OCIDS.append(vm.id)
                     logging.info("VM agregada:" + vm.display_name + " id: " + vm.id)
                 else:
-                    logging.info("VM descartada:" + vm.display_name)
+                    logging.info("VM descartada:" + vm.display_name )
         elif service == 'database':
             for db in self.db_systems:
                 if len(tags.items() & db.freeform_tags.items()) == len(tags.items()):
